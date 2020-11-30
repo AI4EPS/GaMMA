@@ -65,10 +65,10 @@ def configuration(parent_package='', top_path=None):
     #                      include_dirs=[numpy.get_include()],
     #                      libraries=libraries)
 
-    # config.add_extension("_logistic_sigmoid",
-    #                      sources=["_logistic_sigmoid.pyx"],
-    #                      include_dirs=[numpy.get_include()],
-    #                      libraries=libraries)
+    config.add_extension("_logistic_sigmoid",
+                         sources=["_logistic_sigmoid.pyx"],
+                         include_dirs=[numpy.get_include()],
+                         libraries=libraries)
 
     config.add_subpackage('tests')
 
