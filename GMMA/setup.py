@@ -79,7 +79,7 @@ def configuration(parent_package='', top_path=None):
     #                      )
 
     # add the test directory
-    config.add_subpackage('tests')
+    # config.add_subpackage('tests')
 
     # Skip cythonization as we do not want to include the generated
     # C/C++ files in the release tarballs as they are not necessarily
