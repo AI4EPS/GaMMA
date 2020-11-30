@@ -1,8 +1,0 @@
-numpy>=1.13.3
-scipy>=0.19.1
-joblib>=0.11
-threadpoolctl>=2.0.0
-
-[alldeps]
-numpy>=1.13.3
-scipy>=0.19.1
