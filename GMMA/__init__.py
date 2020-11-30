@@ -77,7 +77,7 @@ else:
     # it and importing it first would fail if the OpenMP dll cannot be found.
     from . import _distributor_init  # noqa: F401
     from . import __check_build  # noqa: F401
-    from .base import clone
+    # from .base import clone
     from .utils._show_versions import show_versions
 
     # __all__ = ['calibration', 'cluster', 'covariance', 'cross_decomposition',
@@ -95,8 +95,7 @@ else:
     #            'show_versions']
     __all__ = ['cluster', 'metrics', 'mixture', 'preprocessing', 
                # Non-modules:
-               'clone', 'get_config', 'set_config', 'config_context',
-               'show_versions']
+               'get_config', 'set_config', 'config_context', 'show_versions']
 
 
 def setup_module(module):

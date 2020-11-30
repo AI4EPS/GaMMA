@@ -6,12 +6,12 @@ The :mod:`sklearn.utils` module includes various utilities.
 # from importlib import import_module
 # from operator import itemgetter
 # from collections.abc import Sequence
-# from contextlib import contextmanager
+from contextlib import contextmanager
 # from itertools import compress
 # from itertools import islice
 # import numbers
-# import platform
-# import struct
+import platform
+import struct
 # import timeit
 # from pathlib import Path
 
@@ -21,7 +21,7 @@ The :mod:`sklearn.utils` module includes various utilities.
 
 # from .murmurhash import murmurhash3_32
 # from .class_weight import compute_class_weight, compute_sample_weight
-# from . import _joblib
+from . import _joblib
 # from ..exceptions import DataConversionWarning
 from .deprecation import deprecated
 # from .fixes import np_version, parse_version
