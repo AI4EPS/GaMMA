@@ -10,10 +10,10 @@ def configuration(parent_package='', top_path=None):
     if os.name == 'posix':
         libraries.append('m')
 
-    config.add_extension('_csr_polynomial_expansion',
-                         sources=['_csr_polynomial_expansion.pyx'],
-                         include_dirs=[numpy.get_include()],
-                         libraries=libraries)
+    # config.add_extension('_csr_polynomial_expansion',
+    #                      sources=['_csr_polynomial_expansion.pyx'],
+    #                      include_dirs=[numpy.get_include()],
+    #                      libraries=libraries)
 
     config.add_subpackage('tests')
 

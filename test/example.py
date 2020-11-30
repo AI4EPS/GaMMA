@@ -116,6 +116,7 @@ plt.xlabel("Time (s)")
 # plt.savefig("result.png")
 plt.savefig(os.path.join(figure_dir, f"result_{num_true_event:02d}_{num_event:02d}_{phase_err:01.1f}_{phase_fp:.1f}.png"), bbox_inches="tight")
 plt.savefig(os.path.join(figure_dir, f"result_{num_true_event:02d}_{num_event:02d}_{phase_err:01.1f}_{phase_fp:01.1f}.pdf"), bbox_inches="tight")
+plt.show()
 
 
 

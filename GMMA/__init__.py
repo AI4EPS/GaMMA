@@ -75,7 +75,7 @@ else:
     # It is necessary to do this prior to importing show_versions as the
     # later is linked to the OpenMP runtime to make it possible to introspect
     # it and importing it first would fail if the OpenMP dll cannot be found.
-    from . import _distributor_init  # noqa: F401
+    # from . import _distributor_init  # noqa: F401
     from . import __check_build  # noqa: F401
     # from .base import clone
     from .utils._show_versions import show_versions

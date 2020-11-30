@@ -14,9 +14,9 @@ def configuration(parent_package='', top_path=None):
     if os.name == 'posix':
         libraries.append('m')
 
-    # config.add_extension('sparsefuncs_fast',
-    #                      sources=['sparsefuncs_fast.pyx'],
-    #                      libraries=libraries)
+    config.add_extension('sparsefuncs_fast',
+                         sources=['sparsefuncs_fast.pyx'],
+                         libraries=libraries)
 
     config.add_extension('_cython_blas',
                          sources=['_cython_blas.pyx'],

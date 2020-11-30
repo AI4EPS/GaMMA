@@ -29,8 +29,8 @@ builtins.__SKLEARN_SETUP__ = True
 
 DISTNAME = 'GMMA'
 DESCRIPTION = 'A set of python modules for machine learning and data mining'
-with open('README.rst') as f:
-    LONG_DESCRIPTION = f.read()
+# with open('README.rst') as f:
+#     LONG_DESCRIPTION = f.read()
 MAINTAINER = ''
 MAINTAINER_EMAIL = ''
 URL = ''
@@ -200,12 +200,10 @@ def check_package_status(package, min_version):
         package_status['up_to_date'] = False
         package_status['version'] = ""
 
-    req_str = "scikit-learn requires {} >= {}.\n".format(
+    req_str = "GMMA requires {} >= {}.\n".format(
         package, min_version)
 
-    instructions = ("Installation instructions are available on the "
-                    "scikit-learn website: "
-                    "http://scikit-learn.org/stable/install.html\n")
+    instructions = ("")
 
     if package_status['up_to_date'] is False:
         if package_status['version']:
@@ -229,7 +227,7 @@ def setup_package():
                     download_url=DOWNLOAD_URL,
                     project_urls=PROJECT_URLS,
                     version=VERSION,
-                    long_description=LONG_DESCRIPTION,
+                    # long_description=LONG_DESCRIPTION,
                     classifiers=['Intended Audience :: Science/Research',
                                  'Intended Audience :: Developers',
                                  'License :: OSI Approved',
@@ -282,7 +280,7 @@ def setup_package():
     else:
         if sys.version_info < (3, 6):
             raise RuntimeError(
-                "Scikit-learn requires Python 3.6 or later. The current"
+                "GMMA requires Python 3.6 or later. The current"
                 " Python version is %s installed in %s."
                 % (platform.python_version(), sys.executable))
 
