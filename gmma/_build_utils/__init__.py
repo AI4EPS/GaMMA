@@ -6,7 +6,7 @@ Utilities useful during the build.
 
 
 import os
-import GMMA
+import gmma
 import contextlib
 
 from distutils.version import LooseVersion
@@ -15,11 +15,11 @@ from .pre_build_helpers import basic_check_build
 from .openmp_helpers import check_openmp_support
 
 
-DEFAULT_ROOT = 'GMMA'
+DEFAULT_ROOT = 'gmma'
 
 # The following places need to be in sync with regard to Cython version:
 # - .circleci config file
-# - GMMA/_build_utils/__init__.py
+# - gmma/_build_utils/__init__.py
 # - advanced installation guide
 CYTHON_MIN_VERSION = '0.0.1'
 
@@ -61,7 +61,7 @@ def cythonize_extensions(top_path, config):
     #   cython build-time variable passed to the cythonize() call.
     # - Then in the build_ext subclass defined in the top-level setup.py file
     #   to actually build the compiled extensions with OpenMP flags if needed.
-    GMMA._OPENMP_SUPPORTED = check_openmp_support()
+    gmma._OPENMP_SUPPORTED = check_openmp_support()
 
     n_jobs = 1
     with contextlib.suppress(ImportError):
@@ -76,7 +76,7 @@ def cythonize_extensions(top_path, config):
         config.ext_modules,
         nthreads=n_jobs,
         compile_time_env={
-            'SKLEARN_OPENMP_PARALLELISM_ENABLED': GMMA._OPENMP_SUPPORTED},
+            'SKLEARN_OPENMP_PARALLELISM_ENABLED': gmma._OPENMP_SUPPORTED},
         compiler_directives={'language_level': 3})
 
 

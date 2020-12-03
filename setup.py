@@ -41,9 +41,9 @@ PROJECT_URLS = {
 
 # We can actually import a restricted version of sklearn that
 # does not need the compiled code
-import GMMA
+import gmma
 
-VERSION = GMMA.__version__
+VERSION = gmma.__version__
 
 if platform.python_implementation() == 'PyPy':
     SCIPY_MIN_VERSION = '1.1.0'
@@ -96,7 +96,7 @@ class CleanCommand(Clean):
             print('Will remove generated .c files')
         if os.path.exists('build'):
             shutil.rmtree('build')
-        for dirpath, dirnames, filenames in os.walk('GMMA'):
+        for dirpath, dirnames, filenames in os.walk('gmma'):
             for filename in filenames:
                 if any(filename.endswith(suffix) for suffix in
                        (".so", ".pyd", ".dll", ".pyc")):
@@ -122,9 +122,9 @@ try:
 
     class build_ext_subclass(build_ext):
         def build_extensions(self):
-            from GMMA._build_utils.openmp_helpers import get_openmp_flag
+            from gmma._build_utils.openmp_helpers import get_openmp_flag
 
-            if GMMA._OPENMP_SUPPORTED:
+            if gmma._OPENMP_SUPPORTED:
                 openmp_flag = get_openmp_flag(self.compiler)
 
                 for e in self.extensions:
@@ -160,7 +160,7 @@ def configuration(parent_package='', top_path=None):
         os.remove('MANIFEST')
 
     from numpy.distutils.misc_util import Configuration
-    from GMMA._build_utils import _check_cython_version
+    from gmma._build_utils import _check_cython_version
 
     config = Configuration(None, parent_package, top_path)
 
@@ -177,7 +177,7 @@ def configuration(parent_package='', top_path=None):
     # message from the start if it's not the case.
     _check_cython_version()
 
-    config.add_subpackage('GMMA')
+    config.add_subpackage('gmma')
 
     return config
 

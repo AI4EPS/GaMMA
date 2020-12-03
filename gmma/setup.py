@@ -1,8 +1,8 @@
 import sys
 import os
 
-from GMMA._build_utils import cythonize_extensions
-# from GMMA._build_utils.deprecated_modules import (
+from gmma._build_utils import cythonize_extensions
+# from gmma._build_utils.deprecated_modules import (
 #     _create_deprecated_modules_files
 # )
 
@@ -17,7 +17,7 @@ def configuration(parent_package='', top_path=None):
 
     # _create_deprecated_modules_files()
 
-    config = Configuration('GMMA', parent_package, top_path)
+    config = Configuration('gmma', parent_package, top_path)
 
     # submodules with build utilities
     config.add_subpackage('__check_build')

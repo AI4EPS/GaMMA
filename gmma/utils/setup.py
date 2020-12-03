@@ -1,7 +1,7 @@
 import os
 from os.path import join
 
-from GMMA._build_utils import gen_from_templates
+from gmma._build_utils import gen_from_templates
 
 
 def configuration(parent_package='', top_path=None):
@@ -47,8 +47,8 @@ def configuration(parent_package='', top_path=None):
                          libraries=libraries)
 
     # # generate _seq_dataset from template
-    # templates = ['GMMA/utils/_seq_dataset.pyx.tp',
-    #              'GMMA/utils/_seq_dataset.pxd.tp']
+    # templates = ['gmma/utils/_seq_dataset.pyx.tp',
+    #              'gmma/utils/_seq_dataset.pxd.tp']
     # gen_from_templates(templates, top_path)
 
     # config.add_extension('_seq_dataset',
