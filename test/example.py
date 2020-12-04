@@ -4,7 +4,7 @@ from numpy.core.defchararray import center
 import matplotlib.pyplot as plt
 import os
 #from sklearn import mixture
-from GMMA import mixture
+from gmma import mixture
 from collections import defaultdict
 
 figure_dir = "figures"
