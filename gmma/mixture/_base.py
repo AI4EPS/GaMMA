@@ -71,7 +71,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
 
     def __init__(self, n_components, tol, reg_covar,
                  max_iter, n_init, init_params, random_state, warm_start,
-                 verbose, verbose_interval):
+                 verbose, verbose_interval, dummy_comp=False, dummy_prob=0.01):
         self.n_components = n_components
         self.tol = tol
         self.reg_covar = reg_covar
@@ -82,6 +82,8 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         self.warm_start = warm_start
         self.verbose = verbose
         self.verbose_interval = verbose_interval
+        self.dummy_comp = dummy_comp
+        self.dummy_prob = dummy_prob
 
     def _check_initial_parameters(self, X):
         """Check values of the basic parameters.
@@ -144,12 +146,19 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
 
         if self.init_params == 'kmeans':
             resp = np.zeros((n_samples, self.n_components))
-            label = cluster.KMeans(n_clusters=self.n_components, n_init=1,
-                                   random_state=random_state).fit(X).labels_
+            if self.dummy_comp:
+                label = cluster.KMeans(n_clusters=self.n_components-1, n_init=1,
+                                       random_state=random_state).fit(X).labels_
+            else:
+                label = cluster.KMeans(n_clusters=self.n_components, n_init=1,
+                                       random_state=random_state).fit(X).labels_
             resp[np.arange(n_samples), label] = 1
         elif self.init_params == 'random':
             resp = random_state.rand(n_samples, self.n_components)
             resp /= resp.sum(axis=1)[:, np.newaxis]
+        elif self.init_params == 'centers':
+            self._initialize_centers(X, random_state)
+            return
         else:
             raise ValueError("Unimplemented initialization method '%s'"
                              % self.init_params)
@@ -501,6 +510,8 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             logarithm of the responsibilities
         """
         weighted_log_prob = self._estimate_weighted_log_prob(X)
+        if self.dummy_comp:
+            weighted_log_prob[:, -1] = np.log(self.dummy_prob)
         log_prob_norm = logsumexp(weighted_log_prob, axis=1)
         with np.errstate(under='ignore'):
             # ignore underflow

@@ -50,7 +50,7 @@ def _check_weights(weights, n_components):
     return weights
 
 
-def _check_means(means, n_components, n_features):
+def _check_means(means, n_components, n_samples, n_features):
     """Validate the provided 'means'.
 
     Parameters
@@ -69,7 +69,7 @@ def _check_means(means, n_components, n_features):
     means : array, (n_components, n_features)
     """
     means = check_array(means, dtype=[np.float64, np.float64, np.float32], ensure_2d=False)
-    _check_shape(means, (n_components, n_features), 'means')
+    _check_shape(means, (n_components, n_samples, n_features), 'means')
     return means
 
 
@@ -221,6 +221,13 @@ def _estimate_gaussian_covariances_diag(resp, X, nk, means, reg_covar):
     avg_X_means = means * np.dot(resp.T, X) / nk[:, np.newaxis]
     return avg_X2 - 2 * avg_X_means + avg_means2 + reg_covar
 
+    # n_components, _, n_features = means.shape
+    # covariances = np.empty((n_components, n_features))
+    # for k in range(n_components):
+    #     diff = X - means[k]
+    #     covariances[k] = np.diag(np.dot(resp[:, k] * diff.T, diff)) / nk[k]
+    #     covariances[k] += reg_covar
+    # return covariances
 
 def _estimate_gaussian_covariances_spherical(resp, X, nk, means, reg_covar):
     """Estimate the spherical variance values.
@@ -246,10 +253,30 @@ def _estimate_gaussian_covariances_spherical(resp, X, nk, means, reg_covar):
                                                means, reg_covar).mean(1)
 
 
-def func(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
+def calc_time(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
+    """
+    center: (loc, t)
+    """
     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
     t = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True) / v + center[:,-1:]
     return t
+
+def calc_mag(data, center, station_locs):
+    """
+    center: (loc, t)
+    data: (n_sample, amp)
+    """
+    dist = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True)
+    mag = np.mean(data - 2.48 + 2.76 * np.log10(dist))
+    return mag
+
+def calc_amp(mag, center, station_locs):
+    """
+    center: (loc, t)
+    """
+    dist = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True)
+    logA = mag + 2.48 - 2.76 * np.log10(dist)
+    return logA
 
 # def loss_jacobian(vars, data, station_locs, vp=6.0):
 #     loss = np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True) - vp**2 * (data[:,-1:] - vars[:,-1:])**2
@@ -258,9 +285,13 @@ def func(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
 #     return loss, J
 
 def loss_jacobian(vars, data, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
+    """
+    data: (n_sample, t)
+    """
     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
+    # loc, t = vars[:,:-1], vars[:,-1:]
     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
-    loss = dist/v - (data[:,-1:] - vars[:,-1:])
+    loss = dist/v - (data - vars[:,-1:])
     J = np.zeros([data.shape[0], vars.shape[1]])
     J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-5)/v
     J[:, -1] = 1
@@ -274,12 +305,10 @@ def loss_jacobian(vars, data, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.
 #     return loss, J
 
 def newton_method(vars, data, station_locs, phase_type, weight, max_iter=10, convergence=1e-3):
-    # weight[weight < weight.mean()] = 0.0
     for i in range(max_iter): 
         prev = vars.copy()
         y, J = loss_jacobian(vars, data, station_locs, phase_type)
         JTJ = np.dot(J.T, weight * J)
-        # JTJ = np.dot(J.T,  J)
         I = np.zeros_like(JTJ)
         np.fill_diagonal(I, 1e-5)
         vars -= np.dot(np.linalg.inv(JTJ + I) , np.dot(J.T, y * weight)).T
@@ -305,6 +334,8 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
     covariance_type : {'full', 'tied', 'diag', 'spherical'}
         The type of precision matrices.
 
+    centers_prev: (stations(x, y, ...), time, amp, ...)
+
     Returns
     -------
     nk : array-like of shape (n_components,)
@@ -320,16 +351,30 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
     nk = resp.sum(axis=0) + 10 * np.finfo(resp.dtype).eps
     # means = np.dot(resp.T, X) / nk[:, np.newaxis]
     # means = np.tile(means, [X.shape[0],1,1]).transpose((1,0,2))
+    n_features = X.shape[1]
+
     if centers_prev is None:
-        centers_prev = np.array([0,0])
-    centers = np.zeros_like(centers_prev)
+        centers_prev = np.dot(resp.T, np.hstack([station_locs, X])) / nk[:, np.newaxis]
+    centers = np.zeros_like(centers_prev) #x, y, t, amp, ...
     
     for i in range(len(centers_prev)):
-        centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:].copy(), X, station_locs, phase_type, resp[:,i:i+1])
-
+        if n_features == 1:
+            centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1])
+        elif n_features == 2:
+            centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
+            centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs)
+        else:
+            raise ValueError(f"n_features = {n_features} > 2!")
+    
     means = np.zeros([resp.shape[1], X.shape[0], X.shape[1]])
     for i in range(len(centers)):
-        means[i, :, -1:] = func(centers[i:i+1, :], station_locs, phase_type)
+        if n_features == 1:
+            means[i, :, :] = calc_time(centers[i:i+1, :], station_locs, phase_type)
+        elif n_features == 2:
+            means[i, :, 0:1] = calc_time(centers[i:i+1, :-1], station_locs, phase_type)
+            means[i, :, 1:2] = calc_amp(centers[i:i+1, -1:], centers[i:i+1, :-1], station_locs)
+        else:
+            raise ValueError(f"n_features = {n_features} > 2!")
 
     covariances = {"full": _estimate_gaussian_covariances_full,
                    "tied": _estimate_gaussian_covariances_tied,
@@ -477,6 +522,10 @@ def _estimate_log_gaussian_prob(X, means, precisions_chol, covariance_type):
         log_prob = (np.sum((means ** 2 * precisions), 1) -
                     2. * np.dot(X, (means * precisions).T) +
                     np.dot(X ** 2, precisions.T))
+        # log_prob = np.empty((n_samples, n_components))
+        # for k, (mu, prec_chol) in enumerate(zip(means, precisions_chol)):
+        #     y = np.dot(X, prec_chol) - np.dot(mu, prec_chol)
+        #     log_prob[:, k] = np.square(y)
 
     elif covariance_type == 'spherical':
         precisions = precisions_chol ** 2
@@ -658,13 +707,14 @@ class GaussianMixture(BaseMixture):
     def __init__(self, n_components=1, *, covariance_type='full', tol=1e-3,
                  reg_covar=1e-6, max_iter=100, n_init=1, init_params='kmeans',
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
-                 random_state=None, warm_start=False, station_locs=None, 
-                 phase_type=None, phase_weight=None,
+                 random_state=None, warm_start=False, station_locs=None,
+                 phase_type=None, phase_weight=None, dummy_comp=False, dummy_prob=0.01,
                  verbose=0, verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
             max_iter=max_iter, n_init=n_init, init_params=init_params,
             random_state=random_state, warm_start=warm_start,
+            dummy_comp=dummy_comp, dummy_prob=dummy_prob,
             verbose=verbose, verbose_interval=verbose_interval)
 
         self.covariance_type = covariance_type
@@ -679,13 +729,12 @@ class GaussianMixture(BaseMixture):
         if phase_weight is None:
             phase_weight = np.ones([len(phase_type),1])
         self.station_locs = station_locs
-        self.phase_type = phase_type
-        self.phase_weight = phase_weight
-        # todo: assert shape
+        self.phase_type = np.squeeze(phase_type)
+        self.phase_weight = np.squeeze(phase_weight)
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
-        _, n_features = X.shape
+        n_samples, n_features = X.shape
         if self.covariance_type not in ['spherical', 'tied', 'diag', 'full']:
             raise ValueError("Invalid value for 'covariance_type': %s "
                              "'covariance_type' should be in "
@@ -705,23 +754,31 @@ class GaussianMixture(BaseMixture):
                                                      self.covariance_type,
                                                      self.n_components,
                                                      n_features)
+        
+        if n_features > 2:
+            raise ValueError(f"n_features = {n_features} > 2! Only support 2 features (time, amplitude)")
+        assert(self.covariance_type=='full')
+        assert(self.station_locs.shape[0] == n_samples)
+        _check_shape(self.phase_type, (n_samples, ), 'phase_type')
+        _check_shape(self.phase_weight, (n_samples, ), 'phase_type')
+        # if self.centers_init is not None:
+        #     _check_shape(self.centers_init, (self.n_components, self.station_locs.shape[1] + n_features), 'centers_init')
 
-    def _initialize_parameters(self, X, random_state):
-        """Initialize the model parameters.
 
-        Parameters
-        ----------
-        X : array-like of shape  (n_samples, n_features)
+    def _initialize_centers(self, X, random_state):
 
-        random_state : RandomState
-            A random number generator instance that controls the random seed
-            used for the method chosen to initialize the parameters.
-        """
+
         n_samples, n_features = X.shape
 
         means = np.zeros([self.n_components, n_samples, n_features])
         for i in range(len(self.centers_init)):
-            means[i, :, -1:] = func(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+            if n_features == 1: #(time,)
+                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+            elif n_features == 2: #(time, amp)
+                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+                means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
+            else:
+                raise ValueError(f"n_features = {n_features} > 2!")
         self.centers_ = self.centers_init
         self.means_ = means
 
@@ -732,7 +789,7 @@ class GaussianMixture(BaseMixture):
         elif self.covariance_type == 'full':
             self.precisions_cholesky_ = np.array(
                 [linalg.cholesky(prec_init, lower=True)
-                 for prec_init in self.precisions_init])
+                for prec_init in self.precisions_init])
         elif self.covariance_type == 'tied':
             self.precisions_cholesky_ = linalg.cholesky(self.precisions_init,
                                                         lower=True)
@@ -754,16 +811,19 @@ class GaussianMixture(BaseMixture):
 
         resp : array-like of shape (n_samples, n_components)
         """
-        n_samples, _ = X.shape
+        n_samples, n_features = X.shape
 
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
-            self.station_locs, self.phase_type, self.centers_init)
+            self.station_locs, self.phase_type, centers_prev=None)
         weights /= n_samples
 
-        self.weights_ = (weights if self.weights_init is None else self.weights_init)
-        self.means_ = (means if self.means_init is None else self.means_init)
-        self.centers_ = (centers if self.centers_init is None else self.centers_init)
+        # self.weights_ = (weights if self.weights_init is None else self.weights_init)
+        # self.means_ = (means if self.means_init is None else self.means_init)
+        # self.centers_ = (centers if self.centers_init is None else self.centers_init)
+        self.weights_ = weights
+        self.means_ = means
+        self.centers_ = centers
 
         if self.precisions_init is None:
             self.covariances_ = covariances
@@ -801,7 +861,7 @@ class GaussianMixture(BaseMixture):
 
     def _estimate_log_prob(self, X):
         prob =  _estimate_log_gaussian_prob(X, self.means_, self.precisions_cholesky_, self.covariance_type)
-        return prob + np.log(self.phase_weight)
+        return prob + np.log(self.phase_weight)[:,np.newaxis]
 
     def _estimate_log_weights(self):
         return np.log(self.weights_)
