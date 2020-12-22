@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import os
 from gmma import mixture
 from collections import defaultdict
+import time
 
 figure_dir = "figures"
 if not os.path.exists(figure_dir):
@@ -23,10 +24,6 @@ event_t0 = np.linspace(0, 100/vp, num_true_event)[:,np.newaxis]
 dist = np.linalg.norm(station_loc - event_loc, axis=-1) # n_sta, n_eve, n_dim(x, y, z)
 
 num_event = num_true_event * 2
-# centers_init = np.hstack([np.random.uniform(low=0, high=100, size=[num_event, event_loc.shape[-1]]),
-#                           np.random.uniform(low=0, high=100/vp, size=[num_event, 1])]) # n_eve, n_dim(x, y, z) + 1(t)
-# centers_init = np.hstack([np.ones([num_event, event_loc.shape[-1]]) * 50,
-#                           np.linspace(0, 30, num_event)[:,np.newaxis]]) # n_eve, n_dim(x, y, z) + 1(t)
 
 tp = dist / vp + event_t0
 ts = dist / vs + event_t0
@@ -61,7 +58,6 @@ for i in range(n_noise):
     data_noise[i, 0] = np.random.uniform(low=0, high=np.max(ts))
     data_noise[i, 1] = np.random.uniform(low=np.min(logA), high=np.max(logA))
     phase_type_noise.append(np.random.choice(["p", "s"]))
-
 
 plt.figure(figsize=(10,6))
 for i in range(num_true_event):
@@ -103,14 +99,23 @@ phase_type = phase_type + phase_type_noise
 if not use_amplitude:
     data = data[:,0:1]
 
+centers_init = np.vstack([np.ones(num_event)*np.mean(station_loc[:,0]),
+                        #   np.ones(num_event)*np.mean(station_loc[:,1]),
+                         np.linspace(data[:,0].min(), data[:,0].max(), num_event)]).T # n_eve, n_dim(x, y, z) + 1(t)
+
+
 # Fit a Gaussian mixture with EM 
 dummy_prob = 1/((2*np.pi)**(data.shape[-1]/2) * 20*1.5)
 print(f"dummy_prob = {dummy_prob}")
+
+t_start = time.time()
 gmm = mixture.GaussianMixture(n_components=num_event, #covariance_type='full', 
                               reg_covar=0.1, 
                               station_locs=locs, #centers_init=centers_init.copy(), 
                               phase_type=phase_type,
                               dummy_comp=True, dummy_prob=dummy_prob).fit(data)
+t_end = time.time()
+print(f"GMMA time = {t_end - t_start}")
 
 plt.figure(figsize=(10,6))
 pred = gmm.predict(data) 
