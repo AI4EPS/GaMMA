@@ -6,7 +6,7 @@
 
 import numpy as np
 
-from scipy import linalg
+from scipy import linalg, optimize
 
 from ._base import BaseMixture, _check_shape
 from ..utils import check_array
@@ -278,36 +278,25 @@ def calc_amp(mag, center, station_locs):
     logA = mag + 2.48 - 2.76 * np.log10(dist)
     return logA
 
-# def loss_jacobian(vars, data, station_locs, vp=6.0):
-#     loss = np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True) - vp**2 * (data[:,-1:] - vars[:,-1:])**2
-#     J = 2 * (vars - np.hstack([station_locs, data]))
-#     J[:, -1] *= -vp**2
-#     return loss, J
 
-def loss_jacobian(vars, data, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
+## L2 norm
+def diff_and_grad(vars, data, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
     """
     data: (n_sample, t)
     """
     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
     # loc, t = vars[:,:-1], vars[:,-1:]
     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
-    loss = dist/v - (data - vars[:,-1:])
+    y = dist/v - (data - vars[:,-1:])
     J = np.zeros([data.shape[0], vars.shape[1]])
     J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-5)/v
     J[:, -1] = 1
-    return loss, J
+    return y, J
 
-# def loss_jacobian(vars, data, station_locs, vp=6.0):
-#     loss = np.sum(np.abs(station_locs - vars[:,:-1]), axis=1, keepdims=True) - vp * (data[:,-1:] - vars[:,-1:])
-#     J = np.zeros([data.shape[0], vars.shape[1]])
-#     J[:, :-1] = np.sign(vars[:,:-1] - station_locs)
-#     J[:, -1] = vp
-#     return loss, J
-
-def newton_method(vars, data, station_locs, phase_type, weight, max_iter=10, convergence=1e-3):
+def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, convergence=1):
     for i in range(max_iter): 
         prev = vars.copy()
-        y, J = loss_jacobian(vars, data, station_locs, phase_type)
+        y, J = diff_and_grad(vars, data, station_locs, phase_type)
         JTJ = np.dot(J.T, weight * J)
         I = np.zeros_like(JTJ)
         np.fill_diagonal(I, 1e-5)
@@ -316,8 +305,53 @@ def newton_method(vars, data, station_locs, phase_type, weight, max_iter=10, con
             return vars
     return vars
 
+## l1 norm
+# def loss_and_grad(vars, data, station_locs, phase_type, weights, vel={"p":6.0, "s":6.0/1.75}):
+    
+#     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
+#     vars = vars[np.newaxis, :]
+#     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
+#     J = np.zeros([data.shape[0], vars.shape[1]])
+#     J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-5)/v
+#     J[:, -1] = 1
 
-def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, centers_prev=None):
+#     loss = np.sum(np.abs(dist/v - (data[:,-1:] - vars[:,-1:])) * weights)
+#     J = np.sum(np.sign(dist/v - (data[:,-1:] - vars[:,-1:])) * weights * J, axis=0, keepdims=True)
+
+#     return loss, J
+
+## Huber loss
+def loss_and_grad(vars, data, station_locs, phase_type, weights, sigma=1, vel={"p":6.0, "s":6.0/1.75}):
+    
+    v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
+    vars = vars[np.newaxis, :]
+    dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
+    J = np.zeros([data.shape[0], vars.shape[1]])
+    J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-5)/v
+    J[:, -1] = 1
+    
+    y = dist/v - (data[:,-1:] - vars[:,-1:])
+    mask = np.squeeze(np.abs(y) > sigma)
+
+    loss = np.sum( (sigma*np.abs(y[mask]) - 0.5*sigma**2) * weights[mask] ) \
+           + np.sum( 0.5*y[~mask]**2 * weights[~mask] )
+    J = np.sum( sigma*np.sign(y[mask]) * J[mask] * weights[mask], axis=0, keepdims=True ) \
+        + np.sum( y[~mask] * J[~mask] * weights[~mask], axis=0, keepdims=True )  
+
+    return loss, J
+
+
+def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3): 
+
+    opt = optimize.minimize(loss_and_grad, np.squeeze(vars), method="L-BFGS-B", jac=True,
+                            args=(data, station_locs, phase_type, weight),
+                            options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
+                            bounds=None)
+
+    return opt.x[np.newaxis, :]
+
+
+def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, loss_type="l2", centers_prev=None):
     """Estimate the Gaussian distribution parameters.
 
     Parameters
@@ -359,9 +393,19 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
     
     for i in range(len(centers_prev)):
         if n_features == 1:
-            centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1])
+            if loss_type == "l2":
+                centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1])
+            elif loss_type == "l1":
+                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1])
+            else:
+                raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
         elif n_features == 2:
-            centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
+            if loss_type == "l2":
+                centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
+            elif loss_type == "l1":
+                centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
+            else:
+                raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
             centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs)
         else:
             raise ValueError(f"n_features = {n_features} > 2!")
@@ -708,7 +752,7 @@ class GaussianMixture(BaseMixture):
                  reg_covar=1e-6, max_iter=100, n_init=1, init_params='kmeans',
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
                  random_state=None, warm_start=False, station_locs=None,
-                 phase_type=None, phase_weight=None, dummy_comp=False, dummy_prob=0.01,
+                 phase_type=None, phase_weight=None, dummy_comp=False, dummy_prob=0.01, loss_type="l1",
                  verbose=0, verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -731,6 +775,7 @@ class GaussianMixture(BaseMixture):
         self.station_locs = station_locs
         self.phase_type = np.squeeze(phase_type)
         self.phase_weight = np.squeeze(phase_weight)
+        self.loss_type = loss_type
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -759,6 +804,7 @@ class GaussianMixture(BaseMixture):
             raise ValueError(f"n_features = {n_features} > 2! Only support 2 features (time, amplitude)")
         assert(self.covariance_type=='full')
         assert(self.station_locs.shape[0] == n_samples)
+        assert(self.loss_type in ["l1", "l2"])
         _check_shape(self.phase_type, (n_samples, ), 'phase_type')
         _check_shape(self.phase_weight, (n_samples, ), 'phase_type')
         # if self.centers_init is not None:
@@ -815,7 +861,7 @@ class GaussianMixture(BaseMixture):
 
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
-            self.station_locs, self.phase_type, centers_prev=None)
+            self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=None)
         weights /= n_samples
 
         # self.weights_ = (weights if self.weights_init is None else self.weights_init)
@@ -854,16 +900,23 @@ class GaussianMixture(BaseMixture):
         self.weights_, self.means_, self.covariances_, self.centers_ = (
             _estimate_gaussian_parameters(X, np.exp(log_resp), self.reg_covar,
                                           self.covariance_type, self.station_locs, 
-                                          self.phase_type, self.centers_))
+                                          self.phase_type, loss_type=self.loss_type, centers_prev=self.centers_))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(
             self.covariances_, self.covariance_type)
 
     def _estimate_log_prob(self, X):
         prob =  _estimate_log_gaussian_prob(X, self.means_, self.precisions_cholesky_, self.covariance_type)
+        if self.dummy_comp:
+            prob[:,-1] = np.log(self.dummy_prob)
         return prob + np.log(self.phase_weight)[:,np.newaxis]
 
     def _estimate_log_weights(self):
+        if self.dummy_comp:
+            score = 0.1 #1.0/len(self.weights_)
+            if self.weights_[-1] >= score:
+                self.weights_[:-1] /= np.sum(self.weights_[:-1]) / (1-score)
+                self.weights_[-1] = score
         return np.log(self.weights_)
 
     def _compute_lower_bound(self, _, log_prob_norm):

@@ -262,7 +262,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                 if abs(change) < self.tol:
                     self.converged_ = True
                     break
-
+            
             self._print_verbose_msg_init_end(lower_bound)
 
             if lower_bound > max_lower_bound:
@@ -510,8 +510,6 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             logarithm of the responsibilities
         """
         weighted_log_prob = self._estimate_weighted_log_prob(X)
-        if self.dummy_comp:
-            weighted_log_prob[:, -1] = np.log(self.dummy_prob)
         log_prob_norm = logsumexp(weighted_log_prob, axis=1)
         with np.errstate(under='ignore'):
             # ignore underflow
