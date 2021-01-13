@@ -10,7 +10,7 @@ if not os.path.exists(figure_dir):
     os.makedirs(figure_dir)
 
 np.random.seed(123)
-use_amplitude = True
+use_amplitude = False
 vp = 6.0
 vs = vp/1.75
 num_true_event = 5
@@ -23,7 +23,7 @@ event_mag = np.random.uniform(low=1, high=5, size=(num_true_event, 1))
 event_t0 = np.linspace(0, 100/vp, num_true_event)[:,np.newaxis]
 dist = np.linalg.norm(station_loc - event_loc, axis=-1) # n_sta, n_eve, n_dim(x, y, z)
 
-num_event = num_true_event * 2
+num_event = num_true_event * 4
 
 tp = dist / vp + event_t0
 ts = dist / vs + event_t0
@@ -44,7 +44,7 @@ for i in range(phase_time.shape[0]): #num_true_event
         data[i + j*phase_time.shape[0], 0] = phase_time[i, j] + np.random.uniform(low=-phase_err, high=phase_err)
         data[i + j*phase_time.shape[0], 1] = logA[i, np.mod(j, logA.shape[1])] + np.random.uniform(low=-phase_err, high=phase_err)
 
-phase_fp = 0.0 # false positive
+phase_fp = 1.0 # false positive
 n_noise = int(num_true_event * num_station * phase_fp)
 locs_noise = np.zeros([n_noise, station_loc.shape[-1]]) #n_phase, n_dim(x, y, z)
 station_idx_noise = np.zeros([n_noise, 1])
@@ -105,7 +105,8 @@ centers_init = np.vstack([np.ones(num_event)*np.mean(station_loc[:,0]),
 
 
 # Fit a Gaussian mixture with EM 
-dummy_prob = 1/((2*np.pi)**(data.shape[-1]/2) * 20*1.5)
+dummy_prob = 1/((2*np.pi)**(data.shape[-1]/2) * 2)
+# dummy_prob = 1/30
 print(f"dummy_prob = {dummy_prob}")
 
 t_start = time.time()
@@ -113,8 +114,9 @@ gmm = mixture.GaussianMixture(n_components=num_event, #covariance_type='full',
                             #   reg_covar=0.1, 
                               station_locs=locs, #centers_init=centers_init.copy(), 
                               phase_type=phase_type,
-                            #   dummy_comp=True, 
-                            #   dummy_prob=dummy_prob
+                              dummy_comp=False, 
+                              dummy_prob=dummy_prob,
+                              loss_type="l1"
                               ).fit(data)
 t_end = time.time()
 print(f"GMMA time = {t_end - t_start}")
