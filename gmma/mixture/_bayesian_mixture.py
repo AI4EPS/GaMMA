@@ -316,11 +316,14 @@ class BayesianGaussianMixture(BaseMixture):
                  mean_precision_prior=None, mean_prior=None,
                  degrees_of_freedom_prior=None, covariance_prior=None,
                  random_state=None, warm_start=False, verbose=0,
+                 station_locs=None, phase_type=None, phase_weight=None, 
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1",
                  verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
             max_iter=max_iter, n_init=n_init, init_params=init_params,
             random_state=random_state, warm_start=warm_start,
+            dummy_comp=dummy_comp, dummy_prob=dummy_prob,
             verbose=verbose, verbose_interval=verbose_interval)
 
         self.covariance_type = covariance_type
@@ -330,6 +333,16 @@ class BayesianGaussianMixture(BaseMixture):
         self.mean_prior = mean_prior
         self.degrees_of_freedom_prior = degrees_of_freedom_prior
         self.covariance_prior = covariance_prior
+        if station_locs is None:
+            raise("Missing: station_locs")
+        if phase_type is None:
+            raise("Missing: phase_type")
+        if phase_weight is None:
+            phase_weight = np.ones([len(phase_type),1])
+        self.station_locs = station_locs
+        self.phase_type = np.squeeze(phase_type)
+        self.phase_weight = np.squeeze(phase_weight)
+        self.loss_type = loss_type
 
     def _check_parameters(self, X):
         """Check that the parameters are well defined.
@@ -463,12 +476,14 @@ class BayesianGaussianMixture(BaseMixture):
 
         resp : array-like, shape (n_samples, n_components)
         """
-        nk, xk, sk = _estimate_gaussian_parameters(X, resp, self.reg_covar,
-                                                   self.covariance_type)
+        nk, xk, sk, centers = _estimate_gaussian_parameters(
+            X, resp, self.reg_covar, self.covariance_type,
+            self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=None)
 
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
         self._estimate_precisions(nk, xk, sk)
+        self.centers_ = centers
 
     def _estimate_weights(self, nk):
         """Estimate the parameters of the Dirichlet distribution.
@@ -499,8 +514,8 @@ class BayesianGaussianMixture(BaseMixture):
         """
         self.mean_precision_ = self.mean_precision_prior_ + nk
         self.means_ = ((self.mean_precision_prior_ * self.mean_prior_ +
-                        nk[:, np.newaxis] * xk) /
-                       self.mean_precision_[:, np.newaxis])
+                        nk[:, np.newaxis, np.newaxis] * xk) /
+                       self.mean_precision_[:, np.newaxis, np.newaxis])
 
     def _estimate_precisions(self, nk, xk, sk):
         """Estimate the precisions parameters of the precision distribution.
@@ -540,22 +555,21 @@ class BayesianGaussianMixture(BaseMixture):
 
         sk : array-like, shape (n_components, n_features, n_features)
         """
-        _, n_features = xk.shape
+        _, _, n_features = xk.shape
 
         # Warning : in some Bishop book, there is a typo on the formula 10.63
         # `degrees_of_freedom_k = degrees_of_freedom_0 + Nk` is
         # the correct formula
         self.degrees_of_freedom_ = self.degrees_of_freedom_prior_ + nk
 
-        self.covariances_ = np.empty((self.n_components, n_features,
-                                      n_features))
+        self.covariances_ = np.empty((self.n_components, n_features, n_features))
 
         for k in range(self.n_components):
             diff = xk[k] - self.mean_prior_
             self.covariances_[k] = (self.covariance_prior_ + nk[k] * sk[k] +
                                     nk[k] * self.mean_precision_prior_ /
-                                    self.mean_precision_[k] * np.outer(diff,
-                                                                       diff))
+                                    # self.mean_precision_[k] * np.outer(diff, diff))
+                                    self.mean_precision_[k] * np.dot(diff.T, diff))
 
         # Contrary to the original bishop book, we normalize the covariances
         self.covariances_ /= (
@@ -662,8 +676,9 @@ class BayesianGaussianMixture(BaseMixture):
         """
         n_samples, _ = X.shape
 
-        nk, xk, sk = _estimate_gaussian_parameters(
-            X, np.exp(log_resp), self.reg_covar, self.covariance_type)
+        nk, xk, sk, self.centers_ = _estimate_gaussian_parameters(
+            X, np.exp(log_resp), self.reg_covar, self.covariance_type,
+            self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=self.centers_)
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
         self._estimate_precisions(nk, xk, sk)

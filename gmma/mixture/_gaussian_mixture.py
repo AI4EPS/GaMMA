@@ -751,8 +751,9 @@ class GaussianMixture(BaseMixture):
     def __init__(self, n_components=1, *, covariance_type='full', tol=1e-3,
                  reg_covar=1e-6, max_iter=100, n_init=1, init_params='kmeans',
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
-                 random_state=None, warm_start=False, station_locs=None,
-                 phase_type=None, phase_weight=None, dummy_comp=False, dummy_prob=0.01, loss_type="l1",
+                 random_state=None, warm_start=False, 
+                 station_locs=None, phase_type=None, phase_weight=None, 
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1",
                  verbose=0, verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -898,9 +899,9 @@ class GaussianMixture(BaseMixture):
         """
         n_samples, _ = X.shape
         self.weights_, self.means_, self.covariances_, self.centers_ = (
-            _estimate_gaussian_parameters(X, np.exp(log_resp), self.reg_covar,
-                                          self.covariance_type, self.station_locs, 
-                                          self.phase_type, loss_type=self.loss_type, centers_prev=self.centers_))
+            _estimate_gaussian_parameters(
+                X, np.exp(log_resp), self.reg_covar, self.covariance_type, 
+                self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=self.centers_))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(
             self.covariances_, self.covariance_type)
