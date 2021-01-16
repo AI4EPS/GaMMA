@@ -23,7 +23,7 @@ event_mag = np.random.uniform(low=1, high=5, size=(num_true_event, 1))
 event_t0 = np.linspace(0, 100/vp, num_true_event)[:,np.newaxis]
 dist = np.linalg.norm(station_loc - event_loc, axis=-1) # n_sta, n_eve, n_dim(x, y, z)
 
-num_event = num_true_event * 4
+num_event = num_true_event * 4 
 
 tp = dist / vp + event_t0
 ts = dist / vs + event_t0
@@ -36,7 +36,7 @@ locs = np.zeros([phase_time.size, station_loc.shape[-1]]) #n_phase, n_dim(x, y, 
 station_idx = np.zeros([phase_time.size, 1]) #n_phase, n_dim(x, y, z)
 data = np.zeros([phase_time.size, 2]) #n_phase
 
-phase_err = 0.0
+phase_err = 1.0
 for i in range(phase_time.shape[0]): #num_true_event
     for j in range(phase_time.shape[1]): #num_station
         locs[i + j*phase_time.shape[0], :] = station_loc[j, :]
@@ -44,7 +44,7 @@ for i in range(phase_time.shape[0]): #num_true_event
         data[i + j*phase_time.shape[0], 0] = phase_time[i, j] + np.random.uniform(low=-phase_err, high=phase_err)
         data[i + j*phase_time.shape[0], 1] = logA[i, np.mod(j, logA.shape[1])] + np.random.uniform(low=-phase_err, high=phase_err)
 
-phase_fp = 0.0 # false positive
+phase_fp = 1.0 # false positive
 n_noise = int(num_true_event * num_station * phase_fp)
 locs_noise = np.zeros([n_noise, station_loc.shape[-1]]) #n_phase, n_dim(x, y, z)
 station_idx_noise = np.zeros([n_noise, 1])
@@ -102,7 +102,8 @@ if not use_amplitude:
 centers_init = np.vstack([np.ones(num_event)*np.mean(station_loc[:,0]),
                         #   np.ones(num_event)*np.mean(station_loc[:,1]),
                          np.linspace(data[:,0].min(), data[:,0].max(), num_event)]).T # n_eve, n_dim(x, y, z) + 1(t)
-
+print(data[:,0].max() - data[:,0].min())
+delta_t = data[:,0].max() - data[:,0].min()
 
 # Fit a Gaussian mixture with EM 
 dummy_prob = 1/((2*np.pi)**(data.shape[-1]/2) * 2)
@@ -110,17 +111,32 @@ dummy_prob = 1/((2*np.pi)**(data.shape[-1]/2) * 2)
 print(f"dummy_prob = {dummy_prob}")
 
 t_start = time.time()
-gmm = mixture.BayesianGaussianMixture(n_components=num_event, #covariance_type='full', 
-                                        #   reg_covar=0.1, 
-                                    # weight_concentration_prior = 1,
-                                    mean_precision_prior = 0.01,
-                                    station_locs=locs, 
-                                    # centers_init=centers_init.copy(), 
-                                    phase_type=phase_type,
-                                    dummy_comp=False, 
-                                    dummy_prob=dummy_prob,
-                                    loss_type="l1"
-                                    ).fit(data)
+
+gmm = mixture.BayesianGaussianMixture(n_components=num_event, 
+                                      station_locs=locs, 
+                                      phase_type=phase_type,
+                                    #   weight_concentration_prior = 0.1/num_event,
+                                      mean_precision_prior = 0.1/delta_t,
+                                      covariance_prior = [[1]],
+                                      # covariance_type='full', 
+                                      # reg_covar=0.1, 
+                                      # centers_init=centers_init.copy(),
+                                      # dummy_comp=False, 
+                                      # dummy_prob=dummy_prob,
+                                      loss_type="l1"
+                                      ).fit(data)
+
+# gmm = mixture.GaussianMixture(n_components=num_event,
+#                               station_locs=locs, 
+#                               phase_type=phase_type, 
+#                               # covariance_type='full', 
+#                               # reg_covar=0.1, 
+#                               # centers_init=centers_init.copy(), 
+#                               # dummy_comp=False, 
+#                               # dummy_prob=dummy_prob,
+#                               loss_type="l1"
+#                               ).fit(data)
+
 t_end = time.time()
 print(f"GMMA time = {t_end - t_start}")
 
@@ -133,7 +149,8 @@ colors = defaultdict(int)
 idx = np.argsort(gmm.centers_[:, 1])
 dum = 0
 min_score = np.log(0.3/num_event)
-min_num = num_station
+# min_num = num_station
+min_num = 1
 for i in idx:
     if len(pred[pred==i]) > min_num:
     # if len(score[(pred==i) & (score>min_score)]) > 2:
@@ -145,13 +162,13 @@ for i in idx:
         colors[i] = f"C{dum}"
         dum += 1
 
-for i in range(num_event-1): 
+for i in range(num_event): 
     # if len(pred[pred==i]) > 0:
-    plt.scatter(data[(pred==i), 0], locs[(pred==i), 0],  c=colors[i], s=prob[(pred==i), i]*20, label=f"P/S-phases #{i+1}")
+    plt.scatter(data[(pred==i), 0], locs[(pred==i), 0],  c=colors[i], s=prob[(pred==i), i]*20)#, label=f"P/S-phases #{i+1}")
     # plt.scatter(data[pred==i, 0], locs[pred==i, 0],  c=colors[i], s=np.maximum(score[pred==i], min_score*np.ones_like(score[pred==i])-min_score+0.5)*5, label=f"P/S-phases #{i+1}")
 
-for i in range(num_event-1):
-    if len(pred[pred==i]) > min_num:
+for i in range(num_event):
+    if len(pred[pred==i]) >= min_num:
     # if len(score[(pred==i) & (score>min_score)]) > 2:
         plt.plot(gmm.centers_[i, 1], gmm.centers_[i, 0], "P", c=colors[i], markersize=10, label=f"Estimated Epicenter #{i+1}")
 

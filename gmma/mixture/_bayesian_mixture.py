@@ -316,7 +316,7 @@ class BayesianGaussianMixture(BaseMixture):
                  mean_precision_prior=None, mean_prior=None,
                  degrees_of_freedom_prior=None, covariance_prior=None,
                  random_state=None, warm_start=False, verbose=0,
-                 station_locs=None, phase_type=None, phase_weight=None, 
+                 station_locs=None, phase_type=None, phase_weight=None, centers_init=None,
                  dummy_comp=False, dummy_prob=0.01, loss_type="l1",
                  verbose_interval=10):
         super().__init__(
@@ -333,6 +333,7 @@ class BayesianGaussianMixture(BaseMixture):
         self.mean_prior = mean_prior
         self.degrees_of_freedom_prior = degrees_of_freedom_prior
         self.covariance_prior = covariance_prior
+        self.centers_init = centers_init
         if station_locs is None:
             raise("Missing: station_locs")
         if phase_type is None:

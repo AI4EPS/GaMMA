@@ -814,7 +814,6 @@ class GaussianMixture(BaseMixture):
 
     def _initialize_centers(self, X, random_state):
 
-
         n_samples, n_features = X.shape
 
         means = np.zeros([self.n_components, n_samples, n_features])
