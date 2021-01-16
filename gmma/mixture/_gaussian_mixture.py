@@ -261,13 +261,13 @@ def calc_time(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
     t = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True) / v + center[:,-1:]
     return t
 
-def calc_mag(data, center, station_locs):
+def calc_mag(data, center, station_locs, weight):
     """
     center: (loc, t)
     data: (n_sample, amp)
     """
     dist = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True)
-    mag = np.mean(data - 2.48 + 2.76 * np.log10(dist))
+    mag = np.sum((data - 2.48 + 2.76 * np.log10(dist)) * weight)/(np.sum(weight) + 10 * np.finfo(weight.dtype).eps)
     return mag
 
 def calc_amp(mag, center, station_locs):
@@ -406,7 +406,7 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
                 centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
-            centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs)
+            centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs, resp[:,i:i+1])
         else:
             raise ValueError(f"n_features = {n_features} > 2!")
     
