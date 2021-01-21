@@ -5,6 +5,7 @@
 
 import math
 import numpy as np
+from scipy import linalg
 from scipy.special import betaln, digamma, gammaln
 
 from ._base import BaseMixture, _check_shape
@@ -14,6 +15,7 @@ from ._gaussian_mixture import _compute_log_det_cholesky
 from ._gaussian_mixture import _compute_precision_cholesky
 from ._gaussian_mixture import _estimate_gaussian_parameters
 from ._gaussian_mixture import _estimate_log_gaussian_prob
+from ._gaussian_mixture import calc_time, calc_mag
 from ..utils import check_array
 from ..utils.validation import _deprecate_positional_args
 
@@ -317,7 +319,7 @@ class BayesianGaussianMixture(BaseMixture):
                  degrees_of_freedom_prior=None, covariance_prior=None,
                  random_state=None, warm_start=False, verbose=0,
                  station_locs=None, phase_type=None, phase_weight=None, centers_init=None,
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1",
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None,
                  verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -344,6 +346,7 @@ class BayesianGaussianMixture(BaseMixture):
         self.phase_type = np.squeeze(phase_type)
         self.phase_weight = np.squeeze(phase_weight)
         self.loss_type = loss_type
+        self.bounds = bounds
 
     def _check_parameters(self, X):
         """Check that the parameters are well defined.
@@ -370,6 +373,17 @@ class BayesianGaussianMixture(BaseMixture):
         self._check_means_parameters(X)
         self._check_precision_parameters(X)
         self._checkcovariance_prior_parameter(X)
+
+        n_samples, n_features = X.shape
+        if n_features > 2:
+            raise ValueError(f"n_features = {n_features} > 2! Only support 2 features (time, amplitude)")
+        assert(self.covariance_type=='full')
+        assert(self.station_locs.shape[0] == n_samples)
+        assert(self.loss_type in ["l1", "l2"])
+        _check_shape(self.phase_type, (n_samples, ), 'phase_type')
+        _check_shape(self.phase_weight, (n_samples, ), 'phase_type')
+        if self.init_params == "centers":
+            assert(self.centers_init is not None)
 
     def _check_weights_parameters(self):
         """Check the parameter of the Dirichlet distribution."""
@@ -468,6 +482,27 @@ class BayesianGaussianMixture(BaseMixture):
                              "should be greater than 0., but got %.3f."
                              % self.covariance_prior)
 
+
+    def _initialize_centers(self, X, random_state):
+
+        n_samples, n_features = X.shape
+
+        means = np.zeros([self.n_components, n_samples, n_features])
+        for i in range(len(self.centers_init)):
+            if n_features == 1: #(time,)
+                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+            elif n_features == 2: #(time, amp)
+                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+                means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
+            else:
+                raise ValueError(f"n_features = {n_features} > 2!")
+
+        dist = np.linalg.norm(means - X, axis=-1)
+        resp = np.exp(-dist).T
+        resp /= resp.sum(axis=1)[:, np.newaxis]
+
+        return resp
+
     def _initialize(self, X, resp):
         """Initialization of the mixture parameters.
 
@@ -479,7 +514,8 @@ class BayesianGaussianMixture(BaseMixture):
         """
         nk, xk, sk, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type,
-            self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=None)
+            self.station_locs, self.phase_type, loss_type=self.loss_type, 
+            centers_prev=None, bounds=self.bounds)
 
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
@@ -679,7 +715,8 @@ class BayesianGaussianMixture(BaseMixture):
 
         nk, xk, sk, self.centers_ = _estimate_gaussian_parameters(
             X, np.exp(log_resp), self.reg_covar, self.covariance_type,
-            self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=self.centers_)
+            self.station_locs, self.phase_type, loss_type=self.loss_type, 
+            centers_prev=self.centers_, bounds=self.bounds)
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
         self._estimate_precisions(nk, xk, sk)

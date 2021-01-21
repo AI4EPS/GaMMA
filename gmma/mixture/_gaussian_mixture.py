@@ -267,7 +267,14 @@ def calc_mag(data, center, station_locs, weight):
     data: (n_sample, amp)
     """
     dist = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True)
-    mag = np.sum((data - 2.48 + 2.76 * np.log10(dist)) * weight)/(np.sum(weight) + 10 * np.finfo(weight.dtype).eps)
+    # mag_ = ( data - 2.48 + 2.76 * np.log10(dist) )
+    ## Picozzi et al. (2018) A rapid response magnitude scale...
+    c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
+    mag_ = (data - c0 - c3*np.log10(dist))/c1 + 3.5
+    ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
+    # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
+    # mag_ = (data - c0 - c3*np.log10(dist))/c1
+    mag = np.sum(mag_ * weight) / (np.sum(weight)+10*np.finfo(weight.dtype).eps)
     return mag
 
 def calc_amp(mag, center, station_locs):
@@ -275,7 +282,13 @@ def calc_amp(mag, center, station_locs):
     center: (loc, t)
     """
     dist = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True)
-    logA = mag + 2.48 - 2.76 * np.log10(dist)
+    # logA = mag + 2.48 - 2.76 * np.log10(dist)
+    ## Picozzi et al. (2018) A rapid response magnitude scale...
+    c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
+    logA = c0 + c1*(mag-3.5) + c3*np.log10(dist)
+    ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
+    # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
+    # logA = c0 + c1*mag + c3*np.log10(dist)
     return logA
 
 
@@ -341,17 +354,17 @@ def loss_and_grad(vars, data, station_locs, phase_type, weights, sigma=1, vel={"
     return loss, J
 
 
-def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3): 
+def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None): 
 
     opt = optimize.minimize(loss_and_grad, np.squeeze(vars), method="L-BFGS-B", jac=True,
                             args=(data, station_locs, phase_type, weight),
                             options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
-                            bounds=None)
+                            bounds=bounds)
 
     return opt.x[np.newaxis, :]
 
 
-def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, loss_type="l2", centers_prev=None):
+def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, loss_type="l2", centers_prev=None, bounds=None):
     """Estimate the Gaussian distribution parameters.
 
     Parameters
@@ -396,14 +409,14 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
             if loss_type == "l2":
                 centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1])
             elif loss_type == "l1":
-                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1])
+                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds)
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
         elif n_features == 2:
             if loss_type == "l2":
                 centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
             elif loss_type == "l1":
-                centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
+                centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], bounds=bounds)
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
             centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs, resp[:,i:i+1])
@@ -753,7 +766,7 @@ class GaussianMixture(BaseMixture):
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
                  random_state=None, warm_start=False, 
                  station_locs=None, phase_type=None, phase_weight=None, 
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1",
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None,
                  verbose=0, verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -777,6 +790,7 @@ class GaussianMixture(BaseMixture):
         self.phase_type = np.squeeze(phase_type)
         self.phase_weight = np.squeeze(phase_weight)
         self.loss_type = loss_type
+        self.bounds = bounds
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -808,6 +822,8 @@ class GaussianMixture(BaseMixture):
         assert(self.loss_type in ["l1", "l2"])
         _check_shape(self.phase_type, (n_samples, ), 'phase_type')
         _check_shape(self.phase_weight, (n_samples, ), 'phase_type')
+        if self.init_params == "centers":
+            assert(self.centers_init is not None)
         # if self.centers_init is not None:
         #     _check_shape(self.centers_init, (self.n_components, self.station_locs.shape[1] + n_features), 'centers_init')
 
@@ -825,28 +841,12 @@ class GaussianMixture(BaseMixture):
                 means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
             else:
                 raise ValueError(f"n_features = {n_features} > 2!")
-        self.centers_ = self.centers_init
-        self.means_ = means
 
-        n_components, _, n_features = means.shape
-        covariances = np.ones((n_components, n_features, n_features))
-        if self.precisions_init is None:
-            self.precisions_cholesky_ = _compute_precision_cholesky(covariances, self.covariance_type)
-        elif self.covariance_type == 'full':
-            self.precisions_cholesky_ = np.array(
-                [linalg.cholesky(prec_init, lower=True)
-                for prec_init in self.precisions_init])
-        elif self.covariance_type == 'tied':
-            self.precisions_cholesky_ = linalg.cholesky(self.precisions_init,
-                                                        lower=True)
-        else:
-            self.precisions_cholesky_ = self.precisions_init
+        dist = np.linalg.norm(means - X, axis=-1)
+        resp = np.exp(-dist).T
+        resp /= resp.sum(axis=1)[:, np.newaxis]
 
-        self.weights_ = np.ones([n_samples, n_components])
-        log_prob_norm, log_resp = self._e_step(X)
-        resp = np.exp(log_resp)
-        self.weights_ = (resp.sum(axis=0) + 10 * np.finfo(resp.dtype).eps)/n_samples
-
+        return resp
 
     def _initialize(self, X, resp):
         """Initialization of the Gaussian mixture parameters.
@@ -861,7 +861,8 @@ class GaussianMixture(BaseMixture):
 
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
-            self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=None)
+            self.station_locs, self.phase_type, loss_type=self.loss_type, 
+            centers_prev=None, bounds=self.bounds)
         weights /= n_samples
 
         # self.weights_ = (weights if self.weights_init is None else self.weights_init)
@@ -900,7 +901,8 @@ class GaussianMixture(BaseMixture):
         self.weights_, self.means_, self.covariances_, self.centers_ = (
             _estimate_gaussian_parameters(
                 X, np.exp(log_resp), self.reg_covar, self.covariance_type, 
-                self.station_locs, self.phase_type, loss_type=self.loss_type, centers_prev=self.centers_))
+                self.station_locs, self.phase_type, loss_type=self.loss_type, 
+                centers_prev=self.centers_, bounds=self.bounds))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(
             self.covariances_, self.covariance_type)

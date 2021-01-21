@@ -157,8 +157,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             resp = random_state.rand(n_samples, self.n_components)
             resp /= resp.sum(axis=1)[:, np.newaxis]
         elif self.init_params == 'centers':
-            self._initialize_centers(X, random_state)
-            return
+            resp = self._initialize_centers(X, random_state)
         else:
             raise ValueError("Unimplemented initialization method '%s'"
                              % self.init_params)
