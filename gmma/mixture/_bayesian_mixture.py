@@ -319,7 +319,7 @@ class BayesianGaussianMixture(BaseMixture):
                  degrees_of_freedom_prior=None, covariance_prior=None,
                  random_state=None, warm_start=False, verbose=0,
                  station_locs=None, phase_type=None, phase_weight=None, centers_init=None,
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None,
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=10,
                  verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -347,6 +347,7 @@ class BayesianGaussianMixture(BaseMixture):
         self.phase_weight = np.squeeze(phase_weight)
         self.loss_type = loss_type
         self.bounds = bounds
+        self.max_covar = max_covar
 
     def _check_parameters(self, X):
         """Check that the parameters are well defined.
@@ -515,7 +516,7 @@ class BayesianGaussianMixture(BaseMixture):
         nk, xk, sk, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type,
             self.station_locs, self.phase_type, loss_type=self.loss_type, 
-            centers_prev=None, bounds=self.bounds)
+            centers_prev=None, bounds=self.bounds, max_covar=self.max_covar)
 
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
@@ -716,7 +717,7 @@ class BayesianGaussianMixture(BaseMixture):
         nk, xk, sk, self.centers_ = _estimate_gaussian_parameters(
             X, np.exp(log_resp), self.reg_covar, self.covariance_type,
             self.station_locs, self.phase_type, loss_type=self.loss_type, 
-            centers_prev=self.centers_, bounds=self.bounds)
+            centers_prev=self.centers_, bounds=self.bounds, max_covar=self.max_covar)
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
         self._estimate_precisions(nk, xk, sk)

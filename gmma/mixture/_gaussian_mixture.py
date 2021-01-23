@@ -364,7 +364,8 @@ def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergenc
     return opt.x[np.newaxis, :]
 
 
-def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, loss_type="l2", centers_prev=None, bounds=None):
+def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, 
+                                  loss_type="l2", centers_prev=None, bounds=None, max_covar=20):
     """Estimate the Gaussian distribution parameters.
 
     Parameters
@@ -438,6 +439,8 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
                    "diag": _estimate_gaussian_covariances_diag,
                    "spherical": _estimate_gaussian_covariances_spherical
                    }[covariance_type](resp, X, nk, means, reg_covar)
+
+    covariances = max_covar * np.tanh(covariances/max_covar)
 
     return nk, means, covariances, centers
 
@@ -766,7 +769,7 @@ class GaussianMixture(BaseMixture):
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
                  random_state=None, warm_start=False, 
                  station_locs=None, phase_type=None, phase_weight=None, 
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None,
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=20,
                  verbose=0, verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -791,6 +794,7 @@ class GaussianMixture(BaseMixture):
         self.phase_weight = np.squeeze(phase_weight)
         self.loss_type = loss_type
         self.bounds = bounds
+        self.max_covar = max_covar
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -857,12 +861,12 @@ class GaussianMixture(BaseMixture):
 
         resp : array-like of shape (n_samples, n_components)
         """
-        n_samples, n_features = X.shape
+        n_samples, _ = X.shape
 
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
             self.station_locs, self.phase_type, loss_type=self.loss_type, 
-            centers_prev=None, bounds=self.bounds)
+            centers_prev=None, bounds=self.bounds, cov_max=self.max_covar)
         weights /= n_samples
 
         # self.weights_ = (weights if self.weights_init is None else self.weights_init)
@@ -902,7 +906,7 @@ class GaussianMixture(BaseMixture):
             _estimate_gaussian_parameters(
                 X, np.exp(log_resp), self.reg_covar, self.covariance_type, 
                 self.station_locs, self.phase_type, loss_type=self.loss_type, 
-                centers_prev=self.centers_, bounds=self.bounds))
+                centers_prev=self.centers_, bounds=self.bounds, cov_max=self.max_covar))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(
             self.covariances_, self.covariance_type)
