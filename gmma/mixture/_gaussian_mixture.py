@@ -274,7 +274,7 @@ def calc_mag(data, center, station_locs, weight):
     ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # mag_ = (data - c0 - c3*np.log10(dist))/c1
-    mag = np.sum(mag_ * weight) / (np.sum(weight)+10*np.finfo(weight.dtype).eps)
+    mag = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
     return mag
 
 def calc_amp(mag, center, station_locs):
@@ -302,7 +302,7 @@ def diff_and_grad(vars, data, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.
     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
     y = dist/v - (data - vars[:,-1:])
     J = np.zeros([data.shape[0], vars.shape[1]])
-    J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-5)/v
+    J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-6)/v
     J[:, -1] = 1
     return y, J
 
@@ -312,7 +312,7 @@ def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, con
         y, J = diff_and_grad(vars, data, station_locs, phase_type)
         JTJ = np.dot(J.T, weight * J)
         I = np.zeros_like(JTJ)
-        np.fill_diagonal(I, 1e-5)
+        np.fill_diagonal(I, 1e-3)
         vars -= np.dot(np.linalg.inv(JTJ + I) , np.dot(J.T, y * weight)).T
         if (np.sum(np.abs(vars - prev))) < convergence:
             return vars
@@ -325,7 +325,7 @@ def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, con
 #     vars = vars[np.newaxis, :]
 #     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
 #     J = np.zeros([data.shape[0], vars.shape[1]])
-#     J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-5)/v
+#     J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-6)/v
 #     J[:, -1] = 1
 
 #     loss = np.sum(np.abs(dist/v - (data[:,-1:] - vars[:,-1:])) * weights)
@@ -340,7 +340,7 @@ def loss_and_grad(vars, data, station_locs, phase_type, weights, sigma=1, vel={"
     vars = vars[np.newaxis, :]
     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
     J = np.zeros([data.shape[0], vars.shape[1]])
-    J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-5)/v
+    J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-6)/v
     J[:, -1] = 1
     
     y = dist/v - (data[:,-1:] - vars[:,-1:])
@@ -365,7 +365,7 @@ def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergenc
 
 
 def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, 
-                                  loss_type="l2", centers_prev=None, bounds=None, max_covar=20):
+                                  loss_type="l2", centers_prev=None, bounds=None):
     """Estimate the Gaussian distribution parameters.
 
     Parameters
@@ -440,12 +440,10 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
                    "spherical": _estimate_gaussian_covariances_spherical
                    }[covariance_type](resp, X, nk, means, reg_covar)
 
-    covariances = max_covar * np.tanh(covariances/max_covar)
-
     return nk, means, covariances, centers
 
 
-def _compute_precision_cholesky(covariances, covariance_type):
+def _compute_precision_cholesky(covariances, covariance_type, max_covar=None):
     """Compute the Cholesky decomposition of the precisions.
 
     Parameters
@@ -492,6 +490,11 @@ def _compute_precision_cholesky(covariances, covariance_type):
         if np.any(np.less_equal(covariances, 0.0)):
             raise ValueError(estimate_precision_error_message)
         precisions_chol = 1. / np.sqrt(covariances)
+    
+    if max_covar is not None:
+        non_zero = (np.abs(precisions_chol) != 0.0)
+        precisions_chol[non_zero] = 1.0/(max_covar * np.tanh(1.0/precisions_chol[non_zero]/max_covar))
+
     return precisions_chol
 
 
@@ -769,7 +772,7 @@ class GaussianMixture(BaseMixture):
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
                  random_state=None, warm_start=False, 
                  station_locs=None, phase_type=None, phase_weight=None, 
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=20,
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=None,
                  verbose=0, verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -866,7 +869,7 @@ class GaussianMixture(BaseMixture):
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
             self.station_locs, self.phase_type, loss_type=self.loss_type, 
-            centers_prev=None, bounds=self.bounds, cov_max=self.max_covar)
+            centers_prev=None, bounds=self.bounds)
         weights /= n_samples
 
         # self.weights_ = (weights if self.weights_init is None else self.weights_init)
@@ -879,7 +882,7 @@ class GaussianMixture(BaseMixture):
         if self.precisions_init is None:
             self.covariances_ = covariances
             self.precisions_cholesky_ = _compute_precision_cholesky(
-                covariances, self.covariance_type)
+                covariances, self.covariance_type, self.max_covar)
         elif self.covariance_type == 'full':
             self.precisions_cholesky_ = np.array(
                 [linalg.cholesky(prec_init, lower=True)
@@ -906,10 +909,10 @@ class GaussianMixture(BaseMixture):
             _estimate_gaussian_parameters(
                 X, np.exp(log_resp), self.reg_covar, self.covariance_type, 
                 self.station_locs, self.phase_type, loss_type=self.loss_type, 
-                centers_prev=self.centers_, bounds=self.bounds, cov_max=self.max_covar))
+                centers_prev=self.centers_, bounds=self.bounds))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(
-            self.covariances_, self.covariance_type)
+            self.covariances_, self.covariance_type, self.max_covar)
 
     def _estimate_log_prob(self, X):
         prob =  _estimate_log_gaussian_prob(X, self.means_, self.precisions_cholesky_, self.covariance_type)

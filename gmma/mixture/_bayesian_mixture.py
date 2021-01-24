@@ -319,7 +319,7 @@ class BayesianGaussianMixture(BaseMixture):
                  degrees_of_freedom_prior=None, covariance_prior=None,
                  random_state=None, warm_start=False, verbose=0,
                  station_locs=None, phase_type=None, phase_weight=None, centers_init=None,
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=10,
+                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=None,
                  verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
@@ -516,7 +516,7 @@ class BayesianGaussianMixture(BaseMixture):
         nk, xk, sk, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type,
             self.station_locs, self.phase_type, loss_type=self.loss_type, 
-            centers_prev=None, bounds=self.bounds, max_covar=self.max_covar)
+            centers_prev=None, bounds=self.bounds)
 
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
@@ -578,7 +578,7 @@ class BayesianGaussianMixture(BaseMixture):
          }[self.covariance_type](nk, xk, sk)
 
         self.precisions_cholesky_ = _compute_precision_cholesky(
-            self.covariances_, self.covariance_type)
+            self.covariances_, self.covariance_type, self.max_covar)
 
     def _estimate_wishart_full(self, nk, xk, sk):
         """Estimate the full Wishart distribution parameters.
@@ -593,7 +593,7 @@ class BayesianGaussianMixture(BaseMixture):
 
         sk : array-like, shape (n_components, n_features, n_features)
         """
-        _, _, n_features = xk.shape
+        _, n_samples, n_features = xk.shape
 
         # Warning : in some Bishop book, there is a typo on the formula 10.63
         # `degrees_of_freedom_k = degrees_of_freedom_0 + Nk` is
@@ -607,7 +607,7 @@ class BayesianGaussianMixture(BaseMixture):
             self.covariances_[k] = (self.covariance_prior_ + nk[k] * sk[k] +
                                     nk[k] * self.mean_precision_prior_ /
                                     # self.mean_precision_[k] * np.outer(diff, diff))
-                                    self.mean_precision_[k] * np.dot(diff.T, diff))
+                                    self.mean_precision_[k] * np.dot(diff.T, diff)/n_samples)
 
         # Contrary to the original bishop book, we normalize the covariances
         self.covariances_ /= (
@@ -626,7 +626,7 @@ class BayesianGaussianMixture(BaseMixture):
 
         sk : array-like, shape (n_features, n_features)
         """
-        _, n_features = xk.shape
+        _, _, n_features = xk.shape
 
         # Warning : in some Bishop book, there is a typo on the formula 10.63
         # `degrees_of_freedom_k = degrees_of_freedom_0 + Nk`
@@ -656,7 +656,7 @@ class BayesianGaussianMixture(BaseMixture):
 
         sk : array-like, shape (n_components, n_features)
         """
-        _, n_features = xk.shape
+        _, _, n_features = xk.shape
 
         # Warning : in some Bishop book, there is a typo on the formula 10.63
         # `degrees_of_freedom_k = degrees_of_freedom_0 + Nk`
@@ -685,7 +685,7 @@ class BayesianGaussianMixture(BaseMixture):
 
         sk : array-like, shape (n_components,)
         """
-        _, n_features = xk.shape
+        _, _, n_features = xk.shape
 
         # Warning : in some Bishop book, there is a typo on the formula 10.63
         # `degrees_of_freedom_k = degrees_of_freedom_0 + Nk`
@@ -717,7 +717,7 @@ class BayesianGaussianMixture(BaseMixture):
         nk, xk, sk, self.centers_ = _estimate_gaussian_parameters(
             X, np.exp(log_resp), self.reg_covar, self.covariance_type,
             self.station_locs, self.phase_type, loss_type=self.loss_type, 
-            centers_prev=self.centers_, bounds=self.bounds, max_covar=self.max_covar)
+            centers_prev=self.centers_, bounds=self.bounds)
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
         self._estimate_precisions(nk, xk, sk)

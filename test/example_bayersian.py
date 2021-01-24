@@ -60,7 +60,7 @@ phase_type = phase_type[idx]
 label = label[idx]
 
 ## add false positive picks
-phase_fp = 0.5
+phase_fp = 1.0
 n_noise = int(len(data) * phase_fp)
 locs_noise = np.zeros([n_noise, station_loc.shape[-1]]) #n_phase, n_dim(x, y, z)
 data_noise = np.zeros([n_noise, 2]) #n_phase
@@ -138,13 +138,13 @@ mean_precision_prior = 0.1/delta_t
 if not use_amplitude:
     covariance_prior = np.array([[1]])
 else:
-    covariance_prior = np.array([[1,0],[0,1]])
+    covariance_prior = np.array([[1,0],[0,1]]) 
 print(f"time range: {delta_t:.3f}, amplitude range: {delta_amp:.3f}, mean precision prior: {mean_precision_prior:.3f}")
 
 gmm = mixture.BayesianGaussianMixture(n_components=num_event, 
                                       station_locs=locs, 
                                       phase_type=phase_type,
-                                      # weight_concentration_prior = 0.1/num_event,
+                                      weight_concentration_prior = 10000/num_event,
                                       mean_precision_prior = mean_precision_prior,
                                       covariance_prior = covariance_prior,
                                       # covariance_type='full', 
@@ -153,7 +153,9 @@ gmm = mixture.BayesianGaussianMixture(n_components=num_event,
                                       centers_init=centers_init.copy(),
                                       # dummy_comp=False, 
                                       # dummy_prob=dummy_prob,
-                                      loss_type="l1"
+                                      loss_type="l1",
+                                    #   max_covar=30.0,
+                                    #   reg_covar=0.1,
                                       ).fit(data)
 
 # gmm = mixture.GaussianMixture(n_components=num_event,
