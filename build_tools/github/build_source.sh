@@ -5,6 +5,7 @@ set -x
 
 # Move up two levels to create the virtual
 # environment outside of the source folder
+pwd
 cd ../../
 
 python -m venv build_env
@@ -13,7 +14,8 @@ source build_env/bin/activate
 python -m pip install numpy scipy cython
 python -m pip install twine
 
-cd GMMA/gmma
+pwd
+cd GMMA/GMMA
 python setup.py sdist
 
 # Check whether the source distribution will render correctly
