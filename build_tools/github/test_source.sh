@@ -16,4 +16,4 @@ mkdir tmp_for_test
 cp GMMA/GMMA/conftest.py tmp_for_test
 cd tmp_for_test
 
-pytest --pyargs sklearn
+pytest --pyargs gmma
