@@ -31,9 +31,9 @@ jobs:
           --local-folder dist/ \
           GMMA \
           https://pypi.anaconda.org/zhuwq0/simple/gmma/
-    - name: Check dist has the correct number of artifacts
-      run: |
-        python build_tools/github/check_wheels.py
+    # - name: Check dist has the correct number of artifacts
+    #   run: |
+    #     python build_tools/github/check_wheels.py
     # - name: Publish package to TestPyPI
     #   uses: pypa/gh-action-pypi-publish@v1.4.1
     #   with:
