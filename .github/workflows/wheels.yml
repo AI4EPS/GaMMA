@@ -83,6 +83,7 @@ jobs:
                             MACOSX_DEPLOYMENT_TARGET=10.13
           CIBW_BUILD: cp${{ matrix.python }}-${{ matrix.platform_id }}
           CIBW_MANYLINUX_X86_64_IMAGE: ${{ matrix.manylinux_image }}
+          CIBW_MANYLINUX_I686_IMAGE: ${{ matrix.manylinux_image }}
           CIBW_TEST_REQUIRES: pytest pandas threadpoolctl
           # CIBW_TEST_COMMAND: bash {project}/build_tools/github/test_wheels.sh
 
