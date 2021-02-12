@@ -7,7 +7,7 @@ on:
         required: true
       pypi_repo:
         description: 'Repo to upload to (testpypi or pypi)'
-        default: 'testpypi'
+        default: 'pypi'
         required: true
 
 jobs:

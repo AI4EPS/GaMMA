@@ -21,14 +21,14 @@ n_wheels = 7 * n_python_versions
 n_wheels += 1
 
 # aarch64 builds from travis
-travis_config_path = Path.cwd() / ".travis.yml"
-with travis_config_path.open('r') as f:
-    travis_config = yaml.safe_load(f)
+# travis_config_path = Path.cwd() / ".travis.yml"
+# with travis_config_path.open('r') as f:
+#     travis_config = yaml.safe_load(f)
 
-jobs = travis_config['jobs']['include']
-travis_builds = [j for j in jobs
-                 if any("CIBW_BUILD" in env for env in j["env"])]
-n_wheels += len(travis_builds)
+# jobs = travis_config['jobs']['include']
+# travis_builds = [j for j in jobs
+#                  if any("CIBW_BUILD" in env for env in j["env"])]
+# n_wheels += len(travis_builds)
 
 dist_files = list(Path("dist").glob('**/*'))
 n_dist_files = len(dist_files)
