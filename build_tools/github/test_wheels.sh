@@ -9,7 +9,7 @@ if [[ "$OSTYPE" != "linux-gnu" ]]; then
     cp $CONFTEST_PATH $CONFTEST_NAME
 fi
 
-pytest --pyargs sklearn
+pytest --pyargs gmma
 
 # Test that there are no links to system libraries
-python -m threadpoolctl -i sklearn
+python -m threadpoolctl -i gmma

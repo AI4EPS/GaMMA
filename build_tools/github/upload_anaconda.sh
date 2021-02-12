@@ -3,13 +3,8 @@
 set -e
 set -x
 
-if [ "$GITHUB_EVENT_NAME" == "schedule" ]; then
-    ANACONDA_ORG="scipy-wheels-nightly"
-    ANACONDA_TOKEN="$SCIKIT_LEARN_NIGHTLY_UPLOAD_TOKEN"
-else
-    ANACONDA_ORG="scikit-learn-wheels-staging"
-    ANACONDA_TOKEN="$SCIKIT_LEARN_STAGING_UPLOAD_TOKEN"
-fi
+ANACONDA_ORG="zhuwq0"
+ANACONDA_TOKEN="$ANACONDA_UPLOAD_TOKEN"
 
 pip install git+https://github.com/Anaconda-Server/anaconda-client
 

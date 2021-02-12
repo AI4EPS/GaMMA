@@ -10,15 +10,15 @@ if [[ "$PYTHON_VERSION" == "36" || "$BITNESS" == "32" ]]; then
     # For Python 3.6 and 32-bit architecture use the regular
     # test command (outside of the minimal Docker container)
     cp $CONFTEST_PATH $CONFTEST_NAME
-    pytest --pyargs sklearn
-    python -m threadpoolctl -i sklearn
+    pytest --pyargs gmma
+    python -m threadpoolctl -i gmma
 else
     docker container run -e SKLEARN_SKIP_NETWORK_TESTS=1 \
                          -e OMP_NUM_THREADS=2 \
                          -e OPENBLAS_NUM_THREADS=2 \
                          --rm scikit-learn/minimal-windows \
-                         powershell -Command "pytest --pyargs sklearn"
+                         powershell -Command "pytest --pyargs gmma"
 
     docker container run --rm scikit-learn/minimal-windows \
-                         powershell -Command "python -m threadpoolctl -i sklearn"
+                         powershell -Command "python -m threadpoolctl -i gmma"
 fi
