@@ -29,7 +29,7 @@ jobs:
         python -m wheelhouse_uploader fetch \
           --version $SKLEARN_VERSION \
           --local-folder dist/ \
-          gmma \
+          GMMA \
           https://pypi.anaconda.org/zhuwq0/simple/gmma/
     - name: Check dist has the correct number of artifacts
       run: |
