@@ -1,4 +1,0 @@
-recursive-include gmma *.c *.h *.pyx *.pxd *.pxi *.tp
-include COPYING
-include README.rst
-include pyproject.toml

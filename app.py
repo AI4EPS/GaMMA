@@ -13,7 +13,7 @@ from fastapi import FastAPI
 
 app = FastAPI()
 
-stations = pd.read_csv("../stations.csv", delimiter="\t", index_col="station")
+stations = pd.read_csv("stations.csv", delimiter="\t", index_col="station")
 num_sta = len(stations)
 dims = ['x(km)', 'y(km)', 'z(km)']
 bounds = ((-1, 111),(-1, 111),(0, 20), (None, None))
