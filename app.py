@@ -27,9 +27,13 @@ min_picks_per_eq = int(16 * 0.6)
 oversample_factor = 5.0
 verbose = 1
 
-producer = KafkaProducer(bootstrap_servers=['localhost:9092'],
-                            key_serializer=lambda x: dumps(x).encode('utf-8'),
-                            value_serializer=lambda x: dumps(x).encode('utf-8'))
+use_kafka = True
+try:
+    producer = KafkaProducer(bootstrap_servers=['localhost:9092'],
+                                key_serializer=lambda x: dumps(x).encode('utf-8'),
+                                value_serializer=lambda x: dumps(x).encode('utf-8'))
+except:
+    use_kafka = False
 
 class Pick(BaseModel):
     picks: List[Dict[str, Union[float, str]]]
@@ -130,7 +134,7 @@ def predict(data: Pick):
     data, locs, phase_type, phase_weight = convert_picks(picks, stations)
     event_log = association(data, locs, phase_type, phase_weight)
     print(event_log)
-
-    producer.send('gmma_events', value=event_log)
+    if use_kafka:
+        producer.send('gmma_events', value=event_log)
     return event_log
 
