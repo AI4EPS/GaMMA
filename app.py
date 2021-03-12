@@ -30,8 +30,8 @@ verbose = 1
 use_kafka = True
 try:
     producer = KafkaProducer(bootstrap_servers=['localhost:9092'],
-                                key_serializer=lambda x: dumps(x).encode('utf-8'),
-                                value_serializer=lambda x: dumps(x).encode('utf-8'))
+                             key_serializer=lambda x: dumps(x).encode('utf-8'),
+                             value_serializer=lambda x: dumps(x).encode('utf-8'))
 except:
     use_kafka = False
 
@@ -122,9 +122,6 @@ def association(data, locs, phase_type, phase_weight):
                            "magnitude": mag[i],
                            "std": std_eq[i].tolist()})
 
-        print(events)
-    
-
     return events
 
 @app.get('/predict')
@@ -132,9 +129,10 @@ def predict(data: Pick):
     
     picks = data.picks
     data, locs, phase_type, phase_weight = convert_picks(picks, stations)
-    event_log = association(data, locs, phase_type, phase_weight)
-    print(event_log)
+    events = association(data, locs, phase_type, phase_weight)
+    print(events)
     if use_kafka:
-        producer.send('gmma_events', value=event_log)
-    return event_log
+        for event in events:
+            producer.send('gmma_events', key=event["time"], value=event)
+    return events
 
