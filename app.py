@@ -27,15 +27,25 @@ min_picks_per_eq = int(16 * 0.6)
 oversample_factor = 5.0
 verbose = 1
 
-use_kafka = True
+use_kafka = False
 try:
-    BROKER_URL = 'localhost:9092'
-    # BROKER_URL = 'my-kafka-headless:9092'
+    print('Connecting to k8s kafka')
+    BROKER_URL = 'quakeflow-kafka-headless:9092'
     producer = KafkaProducer(bootstrap_servers=[BROKER_URL],
                              key_serializer=lambda x: dumps(x).encode('utf-8'),
                              value_serializer=lambda x: dumps(x).encode('utf-8'))
+    use_kafka = True
 except BaseException:
-    use_kafka = False
+    print('k8s Kafka connection error')
+
+try:
+    print('Connecting to local kafka')
+    producer = KafkaProducer(bootstrap_servers=['localhost:9092'],
+                             key_serializer=lambda x: dumps(x).encode('utf-8'),
+                             value_serializer=lambda x: dumps(x).encode('utf-8'))
+    use_kafka = True
+except BaseException:
+    print('local Kafka connection error')
 
 
 class Pick(BaseModel):
@@ -142,4 +152,3 @@ def predict(data: Pick):
         for event in events:
             producer.send('gmma_events', key=event["time"], value=event)
     return events
-
