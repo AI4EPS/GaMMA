@@ -13,9 +13,12 @@ from fastapi import FastAPI
 from json import dumps
 from kafka import KafkaProducer
 
+STATION_CSV = "stations.csv"
+STATION_CSV = "stations_iris.csv"
+
 app = FastAPI()
 
-stations = pd.read_csv("stations.csv", delimiter="\t", index_col="station")
+stations = pd.read_csv(STATION_CSV, delimiter="\t", index_col="station")
 num_sta = len(stations)
 dims = ['x(km)', 'y(km)', 'z(km)']
 bounds = ((-1, 111), (-1, 111), (0, 20), (None, None))
@@ -147,9 +150,11 @@ def association(data, locs, phase_type, phase_weight):
 def predict(data: Pick):
 
     picks = data.picks
+    if len(picks) == 0:
+        return []
     data, locs, phase_type, phase_weight = convert_picks(picks, stations)
     events = association(data, locs, phase_type, phase_weight)
-    print(events)
+    print("GMMA:", events)
     if use_kafka:
         for event in events:
             producer.send('gmma_events', key=event["time"], value=event)
