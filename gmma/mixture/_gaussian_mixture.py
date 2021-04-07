@@ -261,7 +261,7 @@ def calc_time(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
     t = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True) / v + center[:,-1:]
     return t
 
-def calc_mag(data, center, station_locs, weight):
+def calc_mag(data, center, station_locs, weight, min=-2, max=8):
     """
     center: (loc, t)
     data: (n_sample, amp)
@@ -275,6 +275,7 @@ def calc_mag(data, center, station_locs, weight):
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # mag_ = (data - c0 - c3*np.log10(dist))/c1
     mag = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
+    mag = np.clip(mag, min, max)
     return mag
 
 def calc_amp(mag, center, station_locs):
@@ -493,7 +494,8 @@ def _compute_precision_cholesky(covariances, covariance_type, max_covar=None):
     
     if max_covar is not None:
         non_zero = (np.abs(precisions_chol) != 0.0)
-        precisions_chol[non_zero] = 1.0/(max_covar * np.tanh(1.0/precisions_chol[non_zero]/max_covar))
+        precisions_chol[non_zero] = 1.0/(np.sqrt(max_covar) * np.tanh(1.0/precisions_chol[non_zero]/np.sqrt(max_covar)))
+        precisions_chol[~non_zero] = 1.0/np.sqrt(max_covar)
 
     return precisions_chol
 
