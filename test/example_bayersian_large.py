@@ -27,7 +27,7 @@ vs = vp/1.75
 num_event = 6
 num_station = 40
 xlim = [0, 2000]
-use_amplitude = True
+use_amplitude = False
 phase_time_err = 0.5
 phase_amp_err = 0.5
 phase_fp_rate = 0.3
@@ -110,7 +110,7 @@ if use_amplitude:
     plt.scatter(phase_time, phase_loc, s=(4**np.array(phase_amp))*1e3, color="grey",  marker="o", alpha=0.8)
 else:
     plt.scatter(phase_time, phase_loc, s=12, color="grey",  marker="o", alpha=0.8)
-plt.scatter(-1, -1, s=24, color="grey",  marker="o", alpha=0.8, label="picks")
+plt.scatter(-1, -1, s=24, color="grey",  marker="o", alpha=0.8, label="Picks")
 plt.xlim(left=0)
 plt.ylim(xlim)
 ylim_ = plt.ylim()
