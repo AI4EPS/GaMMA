@@ -270,7 +270,7 @@ def calc_mag(data, center, station_locs, weight, min=-2, max=8):
     # mag_ = ( data - 2.48 + 2.76 * np.log10(dist) )
     ## Picozzi et al. (2018) A rapid response magnitude scale...
     c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
-    mag_ = (data - c0 - c3*np.log10(dist))/c1 + 3.5
+    mag_ = (data - c0 - c3*np.log10(np.maximum(dist, 1.0)))/c1 + 3.5
     ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # mag_ = (data - c0 - c3*np.log10(dist))/c1
@@ -286,7 +286,7 @@ def calc_amp(mag, center, station_locs):
     # logA = mag + 2.48 - 2.76 * np.log10(dist)
     ## Picozzi et al. (2018) A rapid response magnitude scale...
     c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
-    logA = c0 + c1*(mag-3.5) + c3*np.log10(dist)
+    logA = c0 + c1*(mag-3.5) + c3*np.log10(np.maximum(dist, 1.0))
     ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # logA = c0 + c1*mag + c3*np.log10(dist)
