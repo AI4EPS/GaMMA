@@ -1,0 +1,14 @@
+site_name: "GaMMA"
+site_description: 'GaMMA: earthquake phase association using a bayesian gaussian mixture model'
+site_author: 'Weiqiang Zhu'
+docs_dir: docs/
+repo_name: 'wayneweiqiang/GMMA'
+repo_url: 'https://github.com/wayneweiqiang/GMMA'
+nav:
+    - Overview: README.md
+    - Synthetic Example: example_synthetic.ipynb
+    - PhaseNet Example: example_phasenet.ipynb
+theme:
+  name: 'material'
+plugins:
+  - mkdocs-jupyter
