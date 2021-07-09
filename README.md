@@ -9,10 +9,11 @@
 pip install gmma
 ```
 
+The implementation is based on the [Gaussian mixture models](https://scikit-learn.org/stable/modules/mixture.html#gmm) in [scikit-learn](https://scikit-learn.org/stable/index.html)
+
 ## 2. Related papers:
 - Zhu Weiqiang et al. Earthquake Phase Association using a Bayesian Gaussian Mixture Model (2021)
 ![Method](https://raw.githubusercontent.com/wayneweiqiang/GMMA/master/docs/assets/diagram_gmma_annotated.png)
-
 
 ## 3. Examples:
 
