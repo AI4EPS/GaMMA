@@ -12,8 +12,9 @@ if [[ "$RUNNER_OS" == "macOS" ]]; then
     # supported macos version is: High Sierra / 10.13. When upgrading this, be
     # sure to update the MACOSX_DEPLOYMENT_TARGET environment variable in
     # wheels.yml accordingly.
-    wget https://homebrew.bintray.com/bottles/libomp-11.0.0.high_sierra.bottle.tar.gz
-    brew install libomp-11.0.0.high_sierra.bottle.tar.gz
+    #wget https://homebrew.bintray.com/bottles/libomp-11.0.0.high_sierra.bottle.tar.gz
+    #brew install libomp-11.0.0.high_sierra.bottle.tar.gz
+    brew install libomp
     export CC=/usr/bin/clang
     export CXX=/usr/bin/clang++
     export CPPFLAGS="$CPPFLAGS -Xpreprocessor -fopenmp"
