@@ -37,12 +37,9 @@ except BaseException:
 app = FastAPI()
 
 PROJECT_ROOT = os.path.realpath(os.path.join(os.path.dirname(__file__), '..'))
-
-# STATION_CSV = "stations.csv"
-# STATION_CSV = "stations_iris.csv"
-
 CONFIG_PKL = os.path.join(PROJECT_ROOT, "tests/config_hawaii.pkl")
 STATION_CSV = os.path.join(PROJECT_ROOT, "tests/stations_hawaii.csv")
+
 with open(CONFIG_PKL, "rb") as fp:
     config = pickle.load(fp)
 ## read stations
@@ -82,7 +79,7 @@ def convert_picks_csv(picks, stations, config):
     t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
     a = picks["amp"].apply(lambda x: np.log10(x*1e2)).to_numpy()
     data = np.stack([t, a]).T
-    meta = pd.merge(stations, picks["id"], on="id")
+    meta = stations.merge(picks["id"], how="right", on="id")
     locs = meta[config["dims"]].to_numpy()
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["prob"].to_numpy()[:,np.newaxis]
