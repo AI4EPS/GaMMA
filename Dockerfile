@@ -8,7 +8,7 @@ RUN conda env create --name cs329s --file=env.yml
 # Make RUN commands use the new environment:
 SHELL ["conda", "run", "-n", "cs329s", "/bin/bash", "-c"]
 
-RUN pip install gmma
+RUN pip install -i https://pypi.anaconda.org/zhuwq0/simple gmma
 
 # Copy files
 COPY gmma /app/gmma
