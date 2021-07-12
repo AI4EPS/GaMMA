@@ -95,6 +95,7 @@ else:
     #            'show_versions']
     __all__ = ['cluster', 'metrics', 'mixture', 'preprocessing', 
                # Non-modules:
+               'association',
                'get_config', 'set_config', 'config_context', 'show_versions']
 
 

@@ -8,6 +8,8 @@ RUN conda env create --name cs329s --file=env.yml
 # Make RUN commands use the new environment:
 SHELL ["conda", "run", "-n", "cs329s", "/bin/bash", "-c"]
 
+RUN pip install gmma
+
 # Copy files
 COPY gmma /app/gmma
 COPY tests /app/tests
