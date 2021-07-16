@@ -1,3 +1,5 @@
+GMMA.egg-info
+
 *.pyc
 *.so
 *.pyd
