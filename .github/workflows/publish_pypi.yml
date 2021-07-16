@@ -30,7 +30,7 @@ jobs:
           --version $SKLEARN_VERSION \
           --local-folder dist/ \
           GMMA \
-          https://pypi.anaconda.org/zhuwq0/simple/gmma/
+          https://pypi.anaconda.org/zhuwq0/gmma/
     # - name: Check dist has the correct number of artifacts
     #   run: |
     #     python build_tools/github/check_wheels.py
