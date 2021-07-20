@@ -6,7 +6,7 @@
 
 ## 1. Install
 ```bash
-pip install gmma
+pip install -i https://pypi.anaconda.org/zhuwq0/simple gmma
 ```
 
 The implementation is based on the [Gaussian mixture models](https://scikit-learn.org/stable/modules/mixture.html#gmm) in [scikit-learn](https://scikit-learn.org/stable/index.html)
