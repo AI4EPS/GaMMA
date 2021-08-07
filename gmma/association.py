@@ -35,6 +35,7 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
     assignment = []
     for k in unique_labels:
         if k == -1:
+
             continue
 
         class_mask = labels == k
@@ -126,29 +127,35 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
         pred = gmm.predict(data_)
         prob_matrix = gmm.predict_proba(data_)
         prob_eq = prob_matrix.mean(axis=0)
-        #             prob = prob_matrix[range(len(data_)), pred]
-        #             score = gmm.score(data_)
-        #             score_sample = gmm.score_samples(data_)
+        #  prob = prob_matrix[range(len(data_)), pred]
+        #  score = gmm.score(data_)
+        #  score_sample = gmm.score_samples(data_)
         prob = np.exp(gmm.score_samples(data_))
 
+        ## filtering
+        raw_idx = np.arange(len(centers_init))
         idx = np.array(
             [True if len(data_[pred == i, 0]) >= config["min_picks_per_eq"] else False for i in range(len(prob_eq))]
         )  # & (prob_eq > 1/num_event) #& (sigma_eq[:, 0,0] < 40)
-
+        raw_idx = raw_idx[idx]
         time = gmm.centers_[idx, len(config["dims"])]
         loc = gmm.centers_[idx, : len(config["dims"])]
         if config["use_amplitude"]:
             mag = gmm.centers_[idx, len(config["dims"]) + 1]
         sigma_eq = gmm.covariances_[idx, ...]
-
+        
+        event_id = {} ## map from raw cluster id to filtered event id
         for i in range(len(time)):
             tmp = {"time(s)": time[i], "magnitude": mag[i], "sigma": sigma_eq[i].tolist()}
             for j, k in enumerate(config["dims"]):
                 tmp[k] = loc[i][j]
             events.append(tmp)
+            event_id[raw_idx[i]] = i
 
         for i in range(len(pick_idx_)):
-            assignment.append((pick_idx_[i], pred[i] + event_idx0, prob[i]))
+            ## pred[i] is the raw cluster id; then event_id[pred[i]] maps to the new index of the selected events
+            if pred[i] in event_id:
+                assignment.append((pick_idx_[i], event_id[pred[i]] + event_idx0, prob[i]))
 
         event_idx0 += len(time)
 
