@@ -27,7 +27,7 @@ vs = vp/1.75
 num_event = 6
 num_station = 40
 xlim = [0, 2000]
-use_amplitude = False
+use_amplitude = True
 phase_time_err = 0.5
 phase_amp_err = 0.5
 phase_fp_rate = 0.3
@@ -154,7 +154,7 @@ plt.text(text_loc[0], text_loc[1], '(ii)', horizontalalignment='left', verticala
          transform=plt.gca().transAxes, fontsize="medium", fontweight="normal", bbox=box)
 plt.title("Ground truth")
 
-#################### GMMA ##############################
+#################### GaMMA ##############################
 data = np.hstack([phase_time, phase_amp])
 phase_time_range = np.max(phase_time) - np.min(phase_time)
 phase_amp_range = np.max(phase_amp) - np.min(phase_amp)
@@ -203,7 +203,7 @@ gmm = mixture.BayesianGaussianMixture(n_components=num_event_init,
 #                               ).fit(data)
 
 t_end = time.time()
-print(f"GMMA time = {t_end - t_start}")
+print(f"GaMMA time = {t_end - t_start}")
 
 pred = gmm.predict(data) 
 prob = gmm.predict_proba(data)
@@ -256,7 +256,7 @@ plt.gca().yaxis.set_ticklabels([])
 plt.legend()
 plt.text(text_loc[0], text_loc[1], '(iii)', horizontalalignment='left', verticalalignment='top',
          transform=plt.gca().transAxes, fontsize="medium", fontweight="normal", bbox=box)
-plt.title("GMMA prediction")
+plt.title("GaMMA prediction")
 plt.savefig(os.path.join(figure_dir, f"result_eq{num_event:02d}_sta{num_station:02d}_err{phase_time_err:.1f}_{phase_amp_err:.1f}_fp{phase_fp_rate:.1f}_amp{use_amplitude:01d}.png"), bbox_inches="tight", dpi=300)
 plt.savefig(os.path.join(figure_dir, f"result_eq{num_event:02d}_sta{num_station:02d}_err{phase_time_err:.1f}_{phase_amp_err:.1f}_fp{phase_fp_rate:.1f}_amp{use_amplitude:01d}.pdf"), bbox_inches="tight")
 plt.show()
