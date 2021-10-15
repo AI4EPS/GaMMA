@@ -20,7 +20,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
 
 - Synthetic Example
 
-See details in the [notebook](https://github.com/wayneweiqiang/GMMA/blob/master/docs/example_phasenet.ipynb): [example_synthetic.ipynb](example_phasenet.ipynb)
+See details in the [notebook](https://github.com/wayneweiqiang/GMMA/blob/master/docs/example_synthetic.ipynb): [example_synthetic.ipynb](example_synthetic.ipynb)
 
 ![Association result](https://raw.githubusercontent.com/wayneweiqiang/GMMA/master/docs/assets/result_eq05_err0.0_fp0.0_amp1.png)
 
