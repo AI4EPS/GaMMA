@@ -8,6 +8,10 @@
 ```bash
 pip install -i https://pypi.anaconda.org/zhuwq0/simple gmma
 ```
+or
+```bash
+pip install gmma --extra-index-url=https://pypi.anaconda.org/zhuwq0/simple
+```
 
 The implementation is based on the [Gaussian mixture models](https://scikit-learn.org/stable/modules/mixture.html#gmm) in [scikit-learn](https://scikit-learn.org/stable/index.html)
 
