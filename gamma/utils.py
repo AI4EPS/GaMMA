@@ -129,8 +129,8 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
         ## run prediction
         pred = gmm.predict(data_)
         prob = np.exp(gmm.score_samples(data_))
-        prob_eq = prob_matrix.mean(axis=0)
         prob_matrix = gmm.predict_proba(data_)
+        prob_eq = prob_matrix.mean(axis=0)
         #  prob = prob_matrix[range(len(data_)), pred]
         #  score = gmm.score(data_)
         #  score_sample = gmm.score_samples(data_)
