@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from kafka import KafkaProducer
 from pydantic import BaseModel
 
-from gmma.association import association, convert_picks_csv, from_seconds, to_seconds
+from association import association, convert_picks_csv, from_seconds, to_seconds
 
 try:
     print('Connecting to k8s kafka')

@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN
 
-from gmma import mixture
+from ._gaussian_mixture import GaussianMixture
+from ._bayesian_mixture import BayesianGaussianMixture
+
 
 to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
@@ -19,7 +21,7 @@ def convert_picks_csv(picks, stations, config):
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
     nan_idx = meta.isnull().any(axis=1)
-    return data[~nan_idx], locs[~nan_idx], phase_type[~nan_idx], phase_weight[~nan_idx]
+    return data[~nan_idx], locs[~nan_idx], phase_type[~nan_idx], phase_weight[~nan_idx], picks.index.to_numpy()[~nan_idx]
 
 
 def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_idx0, config, stations, pbar=None):
@@ -30,13 +32,11 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
     labels = db.labels_
     unique_labels = set(labels)
     events = []
-    preds = []
-    probs = []
+    assignment = []  ## from picks to events
 
-    assignment = []
     for k in unique_labels:
-        if k == -1:
 
+        if k == -1:
             continue
 
         class_mask = labels == k
@@ -54,7 +54,7 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
 
         time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
-        # initialization with 5 horizontal points and N time points
+        ## initialization with 5 horizontal points and N time points
         num_event_loc_init = 5
         num_event_init = min(
             max(int(len(data_) / min(num_sta, 20) * config["oversample_factor"]), 1),
@@ -89,7 +89,7 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
             ]
         )
 
-        # initialization with 1 horizontal center points and N time points
+        ## initialization with 1 horizontal center points and N time points
         if len(data_) < len(centers_init):
             num_event_init = min(max(int(len(data_) / min(num_sta, 20) * config["oversample_factor"]), 1), len(data_))
             centers_init = np.vstack(
@@ -103,6 +103,7 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
                 ]
             ).T
 
+        ## run clustering
         mean_precision_prior = 0.1 / time_range
         if not config["use_amplitude"]:
             covariance_prior = np.array([[1]]) * 5
@@ -110,7 +111,7 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
         else:
             covariance_prior = np.array([[1, 0], [0, 1]]) * 5
 
-        gmm = mixture.BayesianGaussianMixture(
+        gmm = BayesianGaussianMixture(
             n_components=len(centers_init),
             weight_concentration_prior=1 / len(centers_init),
             mean_precision_prior=mean_precision_prior,
@@ -125,39 +126,45 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
             max_covar=20 ** 2,
         ).fit(data_)
 
+        ## run prediction
         pred = gmm.predict(data_)
-        prob_matrix = gmm.predict_proba(data_)
+        prob = np.exp(gmm.score_samples(data_))
         prob_eq = prob_matrix.mean(axis=0)
+        prob_matrix = gmm.predict_proba(data_)
         #  prob = prob_matrix[range(len(data_)), pred]
         #  score = gmm.score(data_)
         #  score_sample = gmm.score_samples(data_)
-        prob = np.exp(gmm.score_samples(data_))
-
+        
         ## filtering
-        raw_idx = np.arange(len(centers_init))
+        cluster_idx = np.arange(len(centers_init))
         idx = np.array(
             [True if len(data_[pred == i, 0]) >= config["min_picks_per_eq"] else False for i in range(len(prob_eq))]
         )  # & (prob_eq > 1/num_event) #& (sigma_eq[:, 0,0] < 40)
-        raw_idx = raw_idx[idx]
-        time = gmm.centers_[idx, len(config["dims"])]
-        loc = gmm.centers_[idx, : len(config["dims"])]
+        cluster_idx = cluster_idx[idx]
+        cluster_time = gmm.centers_[idx, len(config["dims"])]
+        cluster_loc = gmm.centers_[idx, : len(config["dims"])]
         if config["use_amplitude"]:
-            mag = gmm.centers_[idx, len(config["dims"]) + 1]
-        sigma_eq = gmm.covariances_[idx, ...]
-        
-        event_id = {} ## map from raw cluster id to filtered event id
-        for i in range(len(time)):
-            tmp = {"time(s)": time[i], "magnitude": mag[i], "sigma": sigma_eq[i].tolist()}
-            for j, k in enumerate(config["dims"]):
-                tmp[k] = loc[i][j]
+            cluster_mag = gmm.centers_[idx, len(config["dims"]) + 1]
+        cluster_covariance = gmm.covariances_[idx, ...]
+
+        ## map from raw cluster id to filtered event id
+        cluster2event_idx = {}
+        for i in range(len(cluster_idx)):
+            tmp = {
+                "time(s)": cluster_time[i],
+                "magnitude": cluster_mag[i],
+                "covariance": cluster_covariance[i].tolist(),
+            }
+            for j, k in enumerate(config["dims"]):  ## add location
+                tmp[k] = cluster_loc[i][j]
             events.append(tmp)
-            event_id[raw_idx[i]] = i
+            cluster2event_idx[cluster_idx[i]] = i
 
         for i in range(len(pick_idx_)):
             ## pred[i] is the raw cluster id; then event_id[pred[i]] maps to the new index of the selected events
-            if pred[i] in event_id:
-                assignment.append((pick_idx_[i], event_id[pred[i]] + event_idx0, prob[i]))
+            if pred[i] in cluster2event_idx:
+                assignment.append((pick_idx_[i], cluster2event_idx[pred[i]] + event_idx0, prob[i]))
 
-        event_idx0 += len(time)
+        event_idx0 += len(cluster_idx)
 
     return events, assignment

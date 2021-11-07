@@ -7,4 +7,5 @@ from ._bayesian_mixture import BayesianGaussianMixture
 
 
 __all__ = ['GaussianMixture',
-           'BayesianGaussianMixture']
+           'BayesianGaussianMixture',
+           'utils']
