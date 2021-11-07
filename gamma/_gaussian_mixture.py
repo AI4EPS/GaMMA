@@ -9,9 +9,9 @@ import numpy as np
 from scipy import linalg, optimize
 
 from ._base import BaseMixture, _check_shape
-from ..utils import check_array
-from ..utils.extmath import row_norms
-from ..utils.validation import _deprecate_positional_args
+from sklearn.utils import check_array
+from sklearn.utils.extmath import row_norms
+from sklearn.utils.validation import _deprecate_positional_args
 
 
 ###############################################################################

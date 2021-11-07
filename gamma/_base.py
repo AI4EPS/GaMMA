@@ -11,12 +11,12 @@ from time import time
 import numpy as np
 from scipy.special import logsumexp
 
-from .. import cluster
-from ..base import BaseEstimator
-from ..base import DensityMixin
-from ..exceptions import ConvergenceWarning
-from ..utils import check_array, check_random_state
-from ..utils.validation import check_is_fitted
+from sklearn import cluster
+from sklearn.base import BaseEstimator
+from sklearn.base import DensityMixin
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.utils import check_array, check_random_state
+from sklearn.utils.validation import check_is_fitted
 
 
 def _check_shape(param, param_shape, name):

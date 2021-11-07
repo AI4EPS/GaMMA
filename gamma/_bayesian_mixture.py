@@ -16,8 +16,8 @@ from ._gaussian_mixture import _compute_precision_cholesky
 from ._gaussian_mixture import _estimate_gaussian_parameters
 from ._gaussian_mixture import _estimate_log_gaussian_prob
 from ._gaussian_mixture import calc_time, calc_mag
-from ..utils import check_array
-from ..utils.validation import _deprecate_positional_args
+from sklearn.utils import check_array
+from sklearn.utils.validation import _deprecate_positional_args
 
 
 def _log_dirichlet_norm(dirichlet_concentration):
