@@ -24,7 +24,7 @@ def convert_picks_csv(picks, stations, config):
     return data[~nan_idx], locs[~nan_idx], phase_type[~nan_idx], phase_weight[~nan_idx], picks.index.to_numpy()[~nan_idx]
 
 
-def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_idx0, config, stations, pbar=None):
+def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_idx0, config, pbar=None):
 
     db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
         np.hstack([data[:, 0:1], locs[:, :2] / 6.0])
@@ -94,8 +94,8 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
             num_event_init = min(max(int(len(data_) / min(num_sta, 20) * config["oversample_factor"]), 1), len(data_))
             centers_init = np.vstack(
                 [
-                    np.ones(num_event_init) * np.mean(stations["x(km)"]),
-                    np.ones(num_event_init) * np.mean(stations["y(km)"]),
+                    np.ones(num_event_init) * np.mean(config["x(km)"]),
+                    np.ones(num_event_init) * np.mean(config["y(km)"]),
                     np.zeros(num_event_init),
                     np.linspace(
                         data_[:, 0].min() - 0.1 * time_range, data_[:, 0].max() + 0.1 * time_range, num_event_init
