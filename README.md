@@ -4,6 +4,8 @@
 [![](https://github.com/wayneweiqiang/GMMA/workflows/pypi/badge.svg)](https://wayneweiqiang.github.io/GMMA)
 [![](https://github.com/wayneweiqiang/GMMA/workflows/wheels/badge.svg)](https://wayneweiqiang.github.io/GMMA)
 
+The project is moved to https://github.com/wayneweiqiang/GaMMA
+
 ## 1. Install
 ```bash
 pip install -i https://pypi.anaconda.org/zhuwq0/simple gmma
