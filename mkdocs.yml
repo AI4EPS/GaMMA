@@ -6,6 +6,7 @@ repo_name: 'wayneweiqiang/GaMMA'
 repo_url: 'https://github.com/wayneweiqiang/GaMMA'
 nav:
     - Overview: README.md
+    - Interactive Example: example_interactive.ipynb
     - Synthetic Example: example_synthetic.ipynb
     - PhaseNet Example: example_phasenet.ipynb
 theme:
