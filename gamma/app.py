@@ -95,7 +95,7 @@ print(stations)
 class Data(BaseModel):
     picks: List[Dict[str, Union[float, str]]]
     stations: List[Dict[str, Union[float, str]]]
-    config: Dict[str, Union[List[float], float, str]]
+    config: Dict[str, Union[List[float], List[int], List[str], float, int, str]]
 
 
 class Pick(BaseModel):
@@ -157,7 +157,7 @@ def run_gamma(data, config, stations):
 def predict(data: Pick):
 
     if len(data.picks) == 0:
-        return []
+        return {"catalog": [], "picks": []}
 
     catalogs, picks_gamma = run_gamma(data, config, stations)
 
@@ -166,14 +166,14 @@ def predict(data: Pick):
         for event in catalogs.to_dict(orient="records"):
             producer.send('gmma_events', key=event["time"], value=event)
     
-    return {"catalog": catalogs.to_json(orient="records"), "picks": picks_gamma.to_json(orient="records")}
+    return {"catalog": catalogs.to_dict(orient="records"), "picks": picks_gamma.to_dict(orient="records")}
 
 
 @app.post('/predict')
 def predict(data: Data):
 
     if len(data.picks) == 0:
-        return []
+        return {"catalog": [], "picks": []}
 
     stations = pd.DataFrame(data.stations)
     assert "latitude" in stations
@@ -209,7 +209,7 @@ def predict(data: Data):
         for event in catalogs.to_dict(orient="records"):
             producer.send('gmma_events', key=event["time"], value=event)
 
-    return {"catalog": catalogs.to_json(orient="records"), "picks": picks_gamma.to_json(orient="records")}
+    return {"catalog": catalogs.to_dict(orient="records"), "picks": picks_gamma.to_dict(orient="records")}
 
 
 @app.get("/healthz")
