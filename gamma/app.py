@@ -204,10 +204,10 @@ def predict(data: Data):
 
     catalogs, picks_gamma = run_gamma(data, config, stations)
 
-    if use_kafka:
-        print("Push events to kafka...")
-        for event in catalogs.to_dict(orient="records"):
-            producer.send('gmma_events', key=event["time"], value=event)
+    # if use_kafka:
+    #     print("Push events to kafka...")
+    #     for event in catalogs.to_dict(orient="records"):
+    #         producer.send('gmma_events', key=event["time"], value=event)
 
     return {"catalog": catalogs.to_dict(orient="records"), "picks": picks_gamma.to_dict(orient="records")}
 
