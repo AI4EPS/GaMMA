@@ -141,7 +141,7 @@ def run_gamma(data, config, stations):
     else:
         catalogs["covariance"] = catalogs["covariance"].apply(lambda x: f"{x[0][0]:.3f}")
     # catalogs.drop(columns=["x(km)", "y(km)", "z(km)", "time(s)"], inplace=True)
-    catalogs = catalogs[['time', 'magnitude', 'longitude', 'latitude', 'depth(m)', 'covariance']]
+    catalogs = catalogs[['time', 'magnitude', 'longitude', 'latitude', 'depth(m)', 'covariance', "event_idx"]]
     print("GaMMA:", catalogs)
 
     ## add assignment to picks
