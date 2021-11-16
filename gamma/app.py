@@ -130,6 +130,7 @@ def run_gamma(data, config, stations):
             assignments.extend(assign)
 
     ## create catalog
+    print(catalogs)
     catalogs = pd.DataFrame(catalogs, columns=["time(s)"] + config["dims"] + ["magnitude", "covariance"])
     catalogs["time"] = catalogs["time(s)"].apply(lambda x: from_seconds(x))
     catalogs["longitude"] = catalogs["x(km)"].apply(lambda x: x / config["degree2km"] + config["center"][0])
@@ -141,8 +142,7 @@ def run_gamma(data, config, stations):
     else:
         catalogs["covariance"] = catalogs["covariance"].apply(lambda x: f"{x[0][0]:.3f}")
     # catalogs.drop(columns=["x(km)", "y(km)", "z(km)", "time(s)"], inplace=True)
-    catalogs = catalogs[['time', 'magnitude', 'longitude', 'latitude', 'depth(m)', 'covariance', "event_idx"]]
-    print("GaMMA:", catalogs)
+    catalogs = catalogs[['time', 'magnitude', 'longitude', 'latitude', 'depth(m)', 'covariance', "event_idx"]]    
 
     ## add assignment to picks
     assignments = pd.DataFrame(assignments, columns=["pick_idx", "event_idx", "prob_gmma"])
