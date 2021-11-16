@@ -176,6 +176,9 @@ def predict(data: Data):
         return {"catalog": [], "picks": []}
 
     stations = pd.DataFrame(data.stations)
+    if len(stations) == 0:
+        return {"catalog": [], "picks": []}
+
     assert "latitude" in stations
     assert "longitude" in stations
     assert "elevation(m)" in stations
