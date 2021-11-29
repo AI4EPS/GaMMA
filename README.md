@@ -1,7 +1,6 @@
 # *GaMMA*: *Ga*ussian *M*ixture *M*odel *A*ssociation 
 
 [![](https://github.com/wayneweiqiang/GaMMA/workflows/documentation/badge.svg)](https://wayneweiqiang.github.io/GaMMA)
-[![](https://github.com/wayneweiqiang/GaMMA/workflows/pypi/badge.svg)](https://wayneweiqiang.github.io/GaMMA)
 [![](https://github.com/wayneweiqiang/GaMMA/workflows/wheels/badge.svg)](https://wayneweiqiang.github.io/GaMMA)
 
 ## 1. Install
