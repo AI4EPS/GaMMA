@@ -18,6 +18,18 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
 
 ## 3. Examples
 
+- Hyperparameters:
+  - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as in the neighborhood of the other. See details in [DBSCAN](https://https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
+  - **dbscan_min_samples** (default = 3): The number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
+  - **min_picks_per_eq** (default = 10): Minimum picks for associated earthquakes.
+  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations) * (oversampling factor).
+  - **use_amplitude** (default = True): If using amplitude information.
+  - **z(km)** (default = [0, 40]): The range of earthquake depth during association. 
+  - **xlim_degree**, **ylim_degree**: The longitude and latitude range of the research region.
+
+Note: DBSCAN is used to cut picks into small windows to speedup association.
+
+
 - Synthetic Example
 
 See details in the [notebook](https://github.com/wayneweiqiang/GaMMA/blob/master/docs/example_synthetic.ipynb): [example_synthetic.ipynb](example_synthetic.ipynb)
