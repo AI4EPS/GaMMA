@@ -152,7 +152,7 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
         for i in range(len(cluster_idx)):
             tmp = {
                 "time(s)": cluster_time[i],
-                "magnitude": cluster_mag[i],
+                "magnitude": cluster_mag[i] if config["use_amplitude"] else 999,
                 "covariance": cluster_covariance[i].tolist(),
             }
             for j, k in enumerate(config["dims"]):  ## add location
