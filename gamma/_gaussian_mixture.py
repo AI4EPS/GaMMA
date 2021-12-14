@@ -311,10 +311,10 @@ def diff_and_grad(vars, data, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.
     J[:, -1] = 1
     return y, J
 
-def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, convergence=1):
+def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, convergence=1, vel={"p":6.0, "s":6.0/1.75}):
     for i in range(max_iter): 
         prev = vars.copy()
-        y, J = diff_and_grad(vars, data, station_locs, phase_type)
+        y, J = diff_and_grad(vars, data, station_locs, phase_type, vel=vel)
         JTJ = np.dot(J.T, weight * J)
         I = np.zeros_like(JTJ)
         np.fill_diagonal(I, 1e-3)
@@ -369,8 +369,8 @@ def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergenc
     return opt.x[np.newaxis, :]
 
 
-def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_locs,  phase_type, 
-                                  loss_type="l2", centers_prev=None, bounds=None):
+def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_locs, phase_type, 
+                                  vel={"p":6.0, "s":6.0/1.75}, loss_type="l2", centers_prev=None, bounds=None):
     """Estimate the Gaussian distribution parameters.
 
     Parameters
@@ -413,14 +413,14 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
     for i in range(len(centers_prev)):
         if n_features == 1:
             if loss_type == "l2":
-                centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1])
+                centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
                 centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds)
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
         elif n_features == 2:
             if loss_type == "l2":
-                centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1])
+                centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
                 centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], bounds=bounds)
             else:
@@ -432,9 +432,9 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type,  station_
     means = np.zeros([resp.shape[1], X.shape[0], X.shape[1]])
     for i in range(len(centers)):
         if n_features == 1:
-            means[i, :, :] = calc_time(centers[i:i+1, :], station_locs, phase_type)
+            means[i, :, :] = calc_time(centers[i:i+1, :], station_locs, phase_type, vel=vel)
         elif n_features == 2:
-            means[i, :, 0:1] = calc_time(centers[i:i+1, :-1], station_locs, phase_type)
+            means[i, :, 0:1] = calc_time(centers[i:i+1, :-1], station_locs, phase_type, vel=vel)
             means[i, :, 1:2] = calc_amp(centers[i:i+1, -1:], centers[i:i+1, :-1], station_locs)
         else:
             raise ValueError(f"n_features = {n_features} > 2!")
@@ -778,6 +778,7 @@ class GaussianMixture(BaseMixture):
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
                  random_state=None, warm_start=False, 
                  station_locs=None, phase_type=None, phase_weight=None, 
+                 vel={"p":6.0, "s":6.0/1.75},
                  dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=None,
                  verbose=0, verbose_interval=10):
         super().__init__(
@@ -798,6 +799,7 @@ class GaussianMixture(BaseMixture):
             raise("Missing: phase_type")
         if phase_weight is None:
             phase_weight = np.ones([len(phase_type),1])
+        self.vel = vel
         self.station_locs = station_locs
         self.phase_type = np.squeeze(phase_type)
         self.phase_weight = np.squeeze(phase_weight)
@@ -874,7 +876,7 @@ class GaussianMixture(BaseMixture):
 
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
-            self.station_locs, self.phase_type, loss_type=self.loss_type, 
+            self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
             centers_prev=None, bounds=self.bounds)
         weights /= n_samples
 
@@ -914,7 +916,7 @@ class GaussianMixture(BaseMixture):
         self.weights_, self.means_, self.covariances_, self.centers_ = (
             _estimate_gaussian_parameters(
                 X, np.exp(log_resp), self.reg_covar, self.covariance_type, 
-                self.station_locs, self.phase_type, loss_type=self.loss_type, 
+                self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
                 centers_prev=self.centers_, bounds=self.bounds))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(

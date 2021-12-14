@@ -7,3 +7,5 @@ docs/test_data.zip*
 docs/test_data
 tests/test_data.zip*
 tests/test_data
+
+build/

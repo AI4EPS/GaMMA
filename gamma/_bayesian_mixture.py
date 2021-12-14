@@ -319,6 +319,7 @@ class BayesianGaussianMixture(BaseMixture):
                  degrees_of_freedom_prior=None, covariance_prior=None,
                  random_state=None, warm_start=False, verbose=0,
                  station_locs=None, phase_type=None, phase_weight=None, centers_init=None,
+                 vel={"p":6.0, "s":6.0/1.75},
                  dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=None,
                  verbose_interval=10):
         super().__init__(
@@ -342,6 +343,7 @@ class BayesianGaussianMixture(BaseMixture):
             raise("Missing: phase_type")
         if phase_weight is None:
             phase_weight = np.ones([len(phase_type),1])
+        self.vel = vel
         self.station_locs = station_locs
         self.phase_type = np.squeeze(phase_type)
         self.phase_weight = np.squeeze(phase_weight)
@@ -491,9 +493,9 @@ class BayesianGaussianMixture(BaseMixture):
         means = np.zeros([self.n_components, n_samples, n_features])
         for i in range(len(self.centers_init)):
             if n_features == 1: #(time,)
-                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
             elif n_features == 2: #(time, amp)
-                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
                 means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
             else:
                 raise ValueError(f"n_features = {n_features} > 2!")
@@ -515,7 +517,7 @@ class BayesianGaussianMixture(BaseMixture):
         """
         nk, xk, sk, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type,
-            self.station_locs, self.phase_type, loss_type=self.loss_type, 
+            self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
             centers_prev=None, bounds=self.bounds)
 
         self._estimate_weights(nk)
@@ -716,7 +718,7 @@ class BayesianGaussianMixture(BaseMixture):
 
         nk, xk, sk, self.centers_ = _estimate_gaussian_parameters(
             X, np.exp(log_resp), self.reg_covar, self.covariance_type,
-            self.station_locs, self.phase_type, loss_type=self.loss_type, 
+            self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
             centers_prev=self.centers_, bounds=self.bounds)
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
