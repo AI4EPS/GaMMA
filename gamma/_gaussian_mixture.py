@@ -340,7 +340,7 @@ def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, con
 
 ## Huber loss
 def loss_and_grad(vars, data, station_locs, phase_type, weights, sigma=1, vel={"p":6.0, "s":6.0/1.75}):
-    
+
     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
     vars = vars[np.newaxis, :]
     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
@@ -359,10 +359,10 @@ def loss_and_grad(vars, data, station_locs, phase_type, weights, sigma=1, vel={"
     return loss, J
 
 
-def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None): 
+def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}): 
 
     opt = optimize.minimize(loss_and_grad, np.squeeze(vars), method="L-BFGS-B", jac=True,
-                            args=(data, station_locs, phase_type, weight),
+                            args=(data, station_locs, phase_type, weight, 1, vel),
                             options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
                             bounds=bounds)
 
@@ -415,14 +415,14 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_l
             if loss_type == "l2":
                 centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
-                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds)
+                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel)
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
         elif n_features == 2:
             if loss_type == "l2":
                 centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
-                centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], bounds=bounds)
+                centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel)
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
             centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs, resp[:,i:i+1])
