@@ -121,6 +121,7 @@ def association(data, locs, phase_type, phase_weight, num_sta, pick_idx, event_i
             station_locs=locs_,
             phase_type=phase_type_,
             phase_weight=phase_weight_,
+            vel=config["vel"] if "vel" in config else {"p":6.0, "s":6.0/1.75},
             loss_type="l1",
             bounds=config["bfgs_bounds"],
             max_covar=20 ** 2,
