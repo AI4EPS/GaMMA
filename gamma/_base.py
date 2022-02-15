@@ -71,7 +71,8 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
 
     def __init__(self, n_components, tol, reg_covar,
                  max_iter, n_init, init_params, random_state, warm_start,
-                 verbose, verbose_interval, dummy_comp=False, dummy_prob=0.01):
+                 verbose, verbose_interval, 
+                 dummy_comp=False, dummy_prob=0.01, dummy_quantile=0.1):
         self.n_components = n_components
         self.tol = tol
         self.reg_covar = reg_covar
@@ -84,6 +85,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         self.verbose_interval = verbose_interval
         self.dummy_comp = dummy_comp
         self.dummy_prob = dummy_prob
+        self.dummy_quantile = dummy_quantile
 
     def _check_initial_parameters(self, X):
         """Check values of the basic parameters.

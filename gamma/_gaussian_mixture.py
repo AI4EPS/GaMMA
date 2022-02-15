@@ -277,8 +277,8 @@ def calc_mag(data, center, station_locs, weight, min=-2, max=8):
     #mag = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
     mu = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
     std = np.sqrt(np.sum((mag_-mu)**2 * weight) / (np.sum(weight)+1e-12))
-    idx = (np.abs(mag_ - mu) <= std)
-    mag = np.sum(mag_[idx] * weight[idx]) / (np.sum(weight[idx])+1e-6)
+    mask = (np.abs(mag_ - mu) <= 2*std)
+    mag = np.sum(mag_[mask] * weight[mask]) / (np.sum(weight[mask])+1e-6)
     mag = np.clip(mag, min, max)
     return mag
 
@@ -324,7 +324,7 @@ def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, con
     return vars
 
 ## l1 norm
-# def loss_and_grad(vars, data, station_locs, phase_type, weights, vel={"p":6.0, "s":6.0/1.75}):
+# def loss_and_grad(vars, data, station_locs, phase_type, weight, vel={"p":6.0, "s":6.0/1.75}):
     
 #     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
 #     vars = vars[np.newaxis, :]
@@ -333,13 +333,13 @@ def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, con
 #     J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-6)/v
 #     J[:, -1] = 1
 
-#     loss = np.sum(np.abs(dist/v - (data[:,-1:] - vars[:,-1:])) * weights)
-#     J = np.sum(np.sign(dist/v - (data[:,-1:] - vars[:,-1:])) * weights * J, axis=0, keepdims=True)
+#     loss = np.sum(np.abs(dist/v - (data[:,-1:] - vars[:,-1:])) * weight)
+#     J = np.sum(np.sign(dist/v - (data[:,-1:] - vars[:,-1:])) * weight * J, axis=0, keepdims=True)
 
 #     return loss, J
 
 ## Huber loss
-def loss_and_grad(vars, data, station_locs, phase_type, weights, sigma=1, vel={"p":6.0, "s":6.0/1.75}):
+def loss_and_grad(vars, data, station_locs, phase_type, weight, sigma=1, vel={"p":6.0, "s":6.0/1.75}):
 
     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
     vars = vars[np.newaxis, :]
@@ -349,14 +349,18 @@ def loss_and_grad(vars, data, station_locs, phase_type, weights, sigma=1, vel={"
     J[:, -1] = 1
     
     y = dist/v - (data[:,-1:] - vars[:,-1:])
-    mask = np.squeeze(np.abs(y) > sigma)
+    std = np.sqrt(np.sum(y**2 * weight) / (np.sum(weight)+1e-12))
+    # mask = (np.abs(y) <= 2*std)
+    mask = True
+    l1 = np.squeeze((np.abs(y) > sigma) & mask)
+    l2 = np.squeeze((np.abs(y) <= sigma) & mask)
 
-    loss = np.sum( (sigma*np.abs(y[mask]) - 0.5*sigma**2) * weights[mask] ) \
-           + np.sum( 0.5*y[~mask]**2 * weights[~mask] )
-    J = np.sum( sigma*np.sign(y[mask]) * J[mask] * weights[mask], axis=0, keepdims=True ) \
-        + np.sum( y[~mask] * J[~mask] * weights[~mask], axis=0, keepdims=True )  
+    loss = np.sum( (sigma*np.abs(y[l1]) - 0.5*sigma**2) * weight[l1] ) \
+           + np.sum( 0.5*y[l2]**2 * weight[l2] )
+    J_ = np.sum( sigma*np.sign(y[l1]) * J[l1] * weight[l1], axis=0, keepdims=True ) \
+        + np.sum( y[l2] * J[l2] * weight[l2], axis=0, keepdims=True )  
 
-    return loss, J
+    return loss, J_
 
 
 def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}): 
@@ -779,13 +783,14 @@ class GaussianMixture(BaseMixture):
                  random_state=None, warm_start=False, 
                  station_locs=None, phase_type=None, phase_weight=None, 
                  vel={"p":6.0, "s":6.0/1.75},
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=None,
+                 dummy_comp=False, dummy_prob=0.01, dummy_quantile=0.1,
+                 loss_type="l1", bounds=None, max_covar=None,
                  verbose=0, verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
             max_iter=max_iter, n_init=n_init, init_params=init_params,
             random_state=random_state, warm_start=warm_start,
-            dummy_comp=dummy_comp, dummy_prob=dummy_prob,
+            dummy_comp=dummy_comp, dummy_prob=dummy_prob, dummy_quantile=dummy_quantile,
             verbose=verbose, verbose_interval=verbose_interval)
 
         self.covariance_type = covariance_type
@@ -925,7 +930,8 @@ class GaussianMixture(BaseMixture):
     def _estimate_log_prob(self, X):
         prob =  _estimate_log_gaussian_prob(X, self.means_, self.precisions_cholesky_, self.covariance_type)
         if self.dummy_comp:
-            prob[:,-1] = np.log(self.dummy_prob)
+            # print(np.quantile(np.max(prob[:,:-1], axis=1), self.dummy_quantile),  np.log(self.dummy_prob))
+            prob[:,-1] = min(np.quantile(np.max(prob[:,:-1], axis=1), self.dummy_quantile),  np.log(self.dummy_prob))
         return prob + np.log(self.phase_weight)[:,np.newaxis]
 
     def _estimate_log_weights(self):

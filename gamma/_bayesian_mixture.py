@@ -320,13 +320,14 @@ class BayesianGaussianMixture(BaseMixture):
                  random_state=None, warm_start=False, verbose=0,
                  station_locs=None, phase_type=None, phase_weight=None, centers_init=None,
                  vel={"p":6.0, "s":6.0/1.75},
-                 dummy_comp=False, dummy_prob=0.01, loss_type="l1", bounds=None, max_covar=None,
+                 dummy_comp=False, dummy_prob=0.01, dummy_quantile=0.1,
+                 loss_type="l1", bounds=None, max_covar=None,
                  verbose_interval=10):
         super().__init__(
             n_components=n_components, tol=tol, reg_covar=reg_covar,
             max_iter=max_iter, n_init=n_init, init_params=init_params,
             random_state=random_state, warm_start=warm_start,
-            dummy_comp=dummy_comp, dummy_prob=dummy_prob,
+            dummy_comp=dummy_comp, dummy_prob=dummy_prob, dummy_quantile=dummy_quantile,
             verbose=verbose, verbose_interval=verbose_interval)
 
         self.covariance_type = covariance_type
@@ -744,6 +745,12 @@ class BayesianGaussianMixture(BaseMixture):
         log_gauss = (_estimate_log_gaussian_prob(
             X, self.means_, self.precisions_cholesky_, self.covariance_type) -
             .5 * n_features * np.log(self.degrees_of_freedom_))
+
+        if self.dummy_comp:
+            # print(np.quantile(np.max(log_gauss[:,:-1], axis=1), self.dummy_quantile),  np.log(self.dummy_prob))
+            log_gauss[:,-1] = min(np.quantile(np.max(log_gauss[:,:-1], axis=1), self.dummy_quantile),  np.log(self.dummy_prob))
+
+        log_gauss += np.log(self.phase_weight)[:,np.newaxis]
 
         log_lambda = n_features * np.log(2.) + np.sum(digamma(
             .5 * (self.degrees_of_freedom_ -
