@@ -78,7 +78,7 @@ def association(
         ## initialization with 5 horizontal points and N time points
         num_event_loc_init = 5
         num_event_init = min(
-            max(int(len(data_) / min(num_sta, 20) * config["oversample_factor"]), 1),
+            max(int(len(data_) / min(num_sta, 50) * config["oversample_factor"]), 1),
             max(len(data_) // num_event_loc_init, 1),
         )
         x0, xn = config["x(km)"]
@@ -201,10 +201,8 @@ def association(
             idx_t = (diff_t**2 < config["max_sigma11"]).squeeze()
             if len(tmp_data[idx_t]) < config["min_picks_per_eq"]:
                 continue
-            if config["use_amplitude"]:
-                gmm.covariances_[i, 0, 0] = np.mean((diff_t[idx_t])**2)
-            else:
-                gmm.covariances_[i, 0] = np.mean((diff_t[idx_t])**2)
+            gmm.covariances_[i, 0, 0] = np.mean((diff_t[idx_t])**2)
+
 
             ## filter by amplitude
             if config["use_amplitude"]:
@@ -221,9 +219,9 @@ def association(
                 "time(s)": gmm.centers_[i, len(config["dims"])],
                 "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
                 # "covariance": gmm.covariances_[i, ...],
-                "sigma_time": gmm.covariances_[i, 0, 0] if config["use_amplitude"] else gmm.covariances_[i, 0],
-                "sigma_amp": gmm.covariances_[i, 1, 1] if config["use_amplitude"] else 0,
-                "sigma_cov": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
+                "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
+                "sigma_amp":  np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
+                "cov_time_amp":  gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
                 "prob_gamma": prob_eq[i],
                 "event_idx": event_idx,
             }
