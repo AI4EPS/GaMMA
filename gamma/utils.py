@@ -22,6 +22,7 @@ def convert_picks_csv(picks, stations, config):
     locs = meta[config["dims"]].to_numpy()
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
+    pick_station_id = picks.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
     nan_idx = meta.isnull().any(axis=1)
     return (
         data[~nan_idx],
@@ -29,6 +30,7 @@ def convert_picks_csv(picks, stations, config):
         phase_type[~nan_idx],
         phase_weight[~nan_idx],
         picks.index.to_numpy()[~nan_idx],
+        pick_station_id[~nan_idx]
     )
 
 
@@ -40,6 +42,7 @@ def association(
     num_sta,
     pick_idx,
     event_idx0,
+    pick_station_id,
     config,
     method="BGMM",
     pbar=None,
@@ -66,6 +69,7 @@ def association(
         phase_type_ = phase_type[class_mask]
         phase_weight_ = phase_weight[class_mask]
         pick_idx_ = pick_idx[class_mask]
+        pick_station_id_ = pick_station_id[class_mask]
 
         if len(pick_idx_) < config["min_picks_per_eq"]:
             continue
@@ -191,28 +195,48 @@ def association(
         for i in range(len(centers_init)):
             tmp_data = data_[pred == i]
             tmp_locs = locs_[pred == i]
+            tmp_pick_station_id = pick_station_id_[pred == i]
             tmp_phase_type = phase_type_[pred == i]
             if len(tmp_data) < config["min_picks_per_eq"]:
                 continue
 
             ## filter by time
             t_ = calc_time(gmm.centers_[i:i+1, :len(config["dims"])+1], tmp_locs, tmp_phase_type, vel=vel)
-            diff_t = t_ - tmp_data[:,0:1]
-            idx_t = (diff_t**2 < config["max_sigma11"]).squeeze()
-            if len(tmp_data[idx_t]) < config["min_picks_per_eq"]:
+            diff_t = np.abs(t_ - tmp_data[:,0:1])
+            idx_t = (diff_t < config["max_sigma11"]).squeeze()
+            idx_filter = idx_t
+            if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
+                continue
+            
+            ## filter multiple picks at the same station
+            unique_sta_id = {} 
+            for j, k in enumerate(tmp_pick_station_id):
+                if (k not in unique_sta_id) or (diff_t[j] < unique_sta_id[k][1]):
+                    unique_sta_id[k] = (j, diff_t[j])
+            idx_s = np.zeros(len(idx_t)).astype(bool) ## based on station
+            for k in unique_sta_id:
+                idx_s[unique_sta_id[k][0]] = True
+            idx_filter = (idx_filter & idx_s)
+            if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
                 continue
             gmm.covariances_[i, 0, 0] = np.mean((diff_t[idx_t])**2)
-
 
             ## filter by amplitude
             if config["use_amplitude"]:
                 a_ = calc_amp(gmm.centers_[i:i+1, len(config["dims"])+1:len(config["dims"])+2], 
-                                    gmm.centers_[i:i+1, :len(config["dims"])+1], 
-                                    tmp_locs)
-                diff_a = a_ - tmp_data[:,1:2]
-                idx_a = (diff_a**2 < config["max_sigma22"]).squeeze()
-                if len(tmp_data[idx_t & idx_a]) < config["min_picks_per_eq"]:
+                              gmm.centers_[i:i+1, :len(config["dims"])+1], 
+                              tmp_locs)
+                diff_a = np.abs(a_ - tmp_data[:,1:2])
+                idx_a = (diff_a < config["max_sigma22"]).squeeze()
+                idx_filter = (idx_filter & idx_a)
+                if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
                     continue
+
+                idx_cov = (np.abs(gmm.covariances_[i, 0, 1]) < config["max_sigma12"])
+                idx_filter = (idx_filter & idx_cov)
+                if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
+                    continue
+
                 gmm.covariances_[i, 1, 1] = np.mean((diff_a[idx_a])**2)
 
             event = {
@@ -228,7 +252,7 @@ def association(
             for j, k in enumerate(config["dims"]):  ## add location
                 event[k] = gmm.centers_[i, j]
             events.append(event)
-            for pi, pr in zip(pick_idx_[pred==i], prob):
+            for pi, pr in zip(pick_idx_[pred==i][idx_filter], prob):
                 assignment.append((pi, event_idx, pr))
             event_idx += 1
 
