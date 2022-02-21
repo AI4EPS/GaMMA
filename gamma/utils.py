@@ -33,23 +33,15 @@ def convert_picks_csv(picks, stations, config):
         pick_station_id[~nan_idx]
     )
 
+def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,):
 
-def association(
-    data,
-    locs,
-    phase_type,
-    phase_weight,
-    num_sta,
-    pick_idx,
-    event_idx0,
-    pick_station_id,
-    config,
-    method="BGMM",
-    pbar=None,
-):
+    data, locs, phase_type, phase_weight, pick_idx, pick_station_id = convert_picks_csv(picks, stations, config)
 
+    num_sta = len(stations)
+    vel = config["vel"] if "vel" in config else {"p":6.0, "s":6.0/1.73}
+    
     db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-        np.hstack([data[:, 0:1], locs[:, :2] / 6.0])
+        np.hstack([data[:, 0:1], locs[:, :2] / vel["p"]])
     )
     # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(data[:, 0:1])
     labels = db.labels_
@@ -80,45 +72,49 @@ def association(
         time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
         ## initialization with 5 horizontal points and N time points
-        num_event_loc_init = 5
-        num_event_init = min(
-            max(int(len(data_) / min(num_sta, 50) * config["oversample_factor"]), 1),
-            max(len(data_) // num_event_loc_init, 1),
-        )
-        x0, xn = config["x(km)"]
-        y0, yn = config["y(km)"]
-        x1, y1 = np.mean(config["x(km)"]), np.mean(config["y(km)"])
-        event_loc_init = [
-            ((x0 + x1) / 2, (y0 + y1) / 2),
-            ((x0 + x1) / 2, (yn + y1) / 2),
-            ((xn + x1) / 2, (y0 + y1) / 2),
-            ((xn + x1) / 2, (yn + y1) / 2),
-            (x1, y1),
-        ]
-        num_event_time_init = max(num_event_init // num_event_loc_init, 1)
-        centers_init = np.vstack(
-            [
-                np.vstack(
-                    [
-                        np.ones(num_event_time_init) * x,
-                        np.ones(num_event_time_init) * y,
-                        np.zeros(num_event_time_init),
-                        np.linspace(
-                            data_[:, 0].min() - 0.1 * time_range,
-                            data_[:, 0].max() + 0.1 * time_range,
-                            num_event_time_init,
-                        ),
-                    ]
-                ).T
-                for x, y in event_loc_init
+        # initial_mode = "one_point"
+        initial_mode = "five_points"
+        if initial_mode == "five_points":
+            num_event_loc_init = 5
+            num_event_init = min(
+                max(int(len(data_) / min(num_sta, 50) * config["oversample_factor"]), 1),
+                max(len(data_) // num_event_loc_init, 1),
+            )
+            x0, xn = config["x(km)"]
+            y0, yn = config["y(km)"]
+            x1, y1 = np.mean(config["x(km)"]), np.mean(config["y(km)"])
+            event_loc_init = [
+                ((x0 + x1) / 2, (y0 + y1) / 2),
+                ((x0 + x1) / 2, (yn + y1) / 2),
+                ((xn + x1) / 2, (y0 + y1) / 2),
+                ((xn + x1) / 2, (yn + y1) / 2),
+                (x1, y1),
             ]
-        )
+            num_event_time_init = max(num_event_init // num_event_loc_init, 1)
+            centers_init = np.vstack(
+                [
+                    np.vstack(
+                        [
+                            np.ones(num_event_time_init) * x,
+                            np.ones(num_event_time_init) * y,
+                            np.zeros(num_event_time_init),
+                            np.linspace(
+                                data_[:, 0].min() - 0.1 * time_range,
+                                data_[:, 0].max() + 0.1 * time_range,
+                                num_event_time_init,
+                            ),
+                        ]
+                    ).T
+                    for x, y in event_loc_init
+                ]
+            )
 
         ## initialization with 1 horizontal center points and N time points
-        if len(data_) < len(centers_init):
+        if (initial_mode == "one_point") or (len(data_) < len(centers_init)):
+
             num_event_init = min(
                 max(
-                    int(len(data_) / min(num_sta, 20) * config["oversample_factor"]), 1
+                    int(len(data_) / min(num_sta, 50) * config["oversample_factor"]), 1
                 ),
                 len(data_),
             )
@@ -136,7 +132,6 @@ def association(
             ).T
 
         ## run clustering
-        vel = config["vel"] if "vel" in config else {"p":6.0, "s":6.0/1.75}
         mean_precision_prior = 0.01 / time_range
         if not config["use_amplitude"]:
             covariance_prior = np.array([[1.0]]) * 5
@@ -232,10 +227,11 @@ def association(
                 if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
                     continue
 
-                idx_cov = (np.abs(gmm.covariances_[i, 0, 1]) < config["max_sigma12"])
-                idx_filter = (idx_filter & idx_cov)
-                if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
-                    continue
+                if "max_sigma12" in config:
+                    idx_cov = (np.abs(gmm.covariances_[i, 0, 1]) < config["max_sigma12"])
+                    idx_filter = (idx_filter & idx_cov)
+                    if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
+                        continue
 
                 gmm.covariances_[i, 1, 1] = np.mean((diff_a[idx_a])**2)
 

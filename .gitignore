@@ -1,6 +1,7 @@
 __pycache__
 GaMMA.egg-info
 figures
+._.DS_Store
 .DS_Store
 
 docs/test_data.zip*
