@@ -94,6 +94,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
             else:                                                               
                 y0, yn = 0.0, 0.0                                               
                 y1 = 0.0
+            if "z(km)" in config:
+                z1 = np.mean(config["z(km)"])
+            else:
+                z1 = 0
             event_loc_init = [
                 ((x0 + x1) / 2, (y0 + y1) / 2),
                 ((x0 + x1) / 2, (yn + y1) / 2),
@@ -109,7 +113,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
                             [
                                 np.ones(num_event_time_init) * x,
                                 np.ones(num_event_time_init) * y,
-                                np.zeros(num_event_time_init),
+                                np.ones(num_event_time_init) * z1,
                                 np.linspace(
                                     data_[:, 0].min() - 0.1 * time_range,
                                     data_[:, 0].max() + 0.1 * time_range,
@@ -172,7 +176,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
                     [
                         np.ones(num_event_init) * np.mean(config["x(km)"]),
                         np.ones(num_event_init) * np.mean(config["y(km)"]),
-                        np.zeros(num_event_init),
+                        np.ones(num_event_init) * np.mean(config["z(km)"]),
                         np.linspace(
                             data_[:, 0].min() - 0.1 * time_range,
                             data_[:, 0].max() + 0.1 * time_range,
