@@ -1,0 +1,44 @@
+name: pypi
+on:
+  push:
+    branches:
+      - master
+  # workflow_dispatch:
+  #   inputs:
+  #     version:
+  #       description: 'Version upload to pypi'
+  #       required: true
+  #     pypi_repo:
+  #       description: 'Repo to upload to (testpypi or pypi)'
+  #       default: 'pypi'
+  #       required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install dependencies
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
+    - name: Install pypa/build
+      run: >-
+        python -m
+        pip install
+        build
+        --user
+    - name: Build a binary wheel and a source tarball
+      run: >-
+        python -m
+        build
+        --sdist
+        --wheel
+        --outdir dist/
+        .
+    - name: Publish package to PyPI
+      uses: pypa/gh-action-pypi-publish@master
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_TOKEN }}
+      # if: ${{ github.event.inputs.pypi_repo == 'pypi' }}
