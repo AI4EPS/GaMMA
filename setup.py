@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name='GaMMA',
+    name='GMMA',
     version='1.0.0',
     packages=['gamma'],
     install_requires=[

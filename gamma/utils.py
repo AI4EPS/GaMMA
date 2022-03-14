@@ -16,8 +16,11 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime(
 
 def convert_picks_csv(picks, stations, config):
     t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
-    a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy()
-    data = np.stack([t, a]).T
+    if config["use_amplitude"]:
+        a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy()
+        data = np.stack([t, a]).T
+    else:
+        data = t[:, np.newaxis]  
     meta = stations.merge(picks["id"], how="right", on="id")
     locs = meta[config["dims"]].to_numpy()
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
@@ -71,18 +74,26 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
 
         time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
-        ## initialization with 5 horizontal points and N time points
-        # initial_mode = "one_point"
-        initial_mode = "five_points"
+        ## initialization with 5 horizontal points and N//5 time points
+        initial_mode = "one_point"
+        # initial_mode = "five_points"
         if initial_mode == "five_points":
             num_event_loc_init = 5
-            num_event_init = min(
-                max(int(len(data_) / min(num_sta, 50) * config["oversample_factor"]), 1),
-                max(len(data_) // num_event_loc_init, 1),
-            )
-            x0, xn = config["x(km)"]
-            y0, yn = config["y(km)"]
-            x1, y1 = np.mean(config["x(km)"]), np.mean(config["y(km)"])
+            if "num_event_init" in config:
+                num_event_init = config["num_event_init"]
+            else:
+                num_event_init = min(
+                    max(int(len(data_) / num_sta * config["oversample_factor"]), 3),
+                    max(len(data_) // num_event_loc_init, 1),
+                )
+            x0, xn = config["x(km)"]                                            
+            x1 = np.mean(config["x(km)"])                                       
+            if "y(km)" in config:                                               
+                y0, yn = config["y(km)"]                                        
+                y1 = np.mean(config["y(km)"])                                   
+            else:                                                               
+                y0, yn = 0.0, 0.0                                               
+                y1 = 0.0
             event_loc_init = [
                 ((x0 + x1) / 2, (y0 + y1) / 2),
                 ((x0 + x1) / 2, (yn + y1) / 2),
@@ -91,45 +102,109 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
                 (x1, y1),
             ]
             num_event_time_init = max(num_event_init // num_event_loc_init, 1)
-            centers_init = np.vstack(
-                [
-                    np.vstack(
-                        [
-                            np.ones(num_event_time_init) * x,
-                            np.ones(num_event_time_init) * y,
-                            np.zeros(num_event_time_init),
-                            np.linspace(
-                                data_[:, 0].min() - 0.1 * time_range,
-                                data_[:, 0].max() + 0.1 * time_range,
-                                num_event_time_init,
-                            ),
-                        ]
-                    ).T
-                    for x, y in event_loc_init
-                ]
-            )
+            if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
+                centers_init = np.vstack(
+                    [
+                        np.vstack(
+                            [
+                                np.ones(num_event_time_init) * x,
+                                np.ones(num_event_time_init) * y,
+                                np.zeros(num_event_time_init),
+                                np.linspace(
+                                    data_[:, 0].min() - 0.1 * time_range,
+                                    data_[:, 0].max() + 0.1 * time_range,
+                                    num_event_time_init,
+                                ),
+                            ]
+                        ).T
+                        for x, y in event_loc_init
+                    ]
+                )
+            elif config["dims"] == ["x(km)", "y(km)"]:
+                centers_init = np.vstack(
+                    [
+                        np.vstack(
+                            [
+                                np.ones(num_event_time_init) * x,
+                                np.ones(num_event_time_init) * y,
+                                np.linspace(
+                                    data_[:, 0].min() - 0.1 * time_range,
+                                    data_[:, 0].max() + 0.1 * time_range,
+                                    num_event_time_init,
+                                ),
+                            ]
+                        ).T
+                        for x, y in event_loc_init
+                    ]
+                )
+            elif config["dims"] == ["x(km)"]:
+                centers_init = np.vstack(
+                    [
+                        np.vstack(
+                            [
+                                np.ones(num_event_time_init) * x,
+                                np.linspace(
+                                    data_[:, 0].min() - 0.1 * time_range,
+                                    data_[:, 0].max() + 0.1 * time_range,
+                                    num_event_time_init,
+                                ),
+                            ]
+                        ).T
+                        for x, y in event_loc_init
+                    ]
+                )
+            else:
+                raise(ValueError("Unsupported dims"))
 
         ## initialization with 1 horizontal center points and N time points
         if (initial_mode == "one_point") or (len(data_) < len(centers_init)):
-
-            num_event_init = min(
-                max(
-                    int(len(data_) / min(num_sta, 50) * config["oversample_factor"]), 1
-                ),
-                len(data_),
-            )
-            centers_init = np.vstack(
-                [
-                    np.ones(num_event_init) * np.mean(config["x(km)"]),
-                    np.ones(num_event_init) * np.mean(config["y(km)"]),
-                    np.zeros(num_event_init),
-                    np.linspace(
-                        data_[:, 0].min() - 0.1 * time_range,
-                        data_[:, 0].max() + 0.1 * time_range,
-                        num_event_init,
+            if "num_event_init" in config:
+                num_event_init = config["num_event_init"]
+            else:
+                num_event_init = min(
+                    max(
+                        int(len(data_) / num_sta * config["oversample_factor"]), 3
                     ),
-                ]
-            ).T
+                    len(data_),
+                )
+            if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
+                centers_init = np.vstack(
+                    [
+                        np.ones(num_event_init) * np.mean(config["x(km)"]),
+                        np.ones(num_event_init) * np.mean(config["y(km)"]),
+                        np.zeros(num_event_init),
+                        np.linspace(
+                            data_[:, 0].min() - 0.1 * time_range,
+                            data_[:, 0].max() + 0.1 * time_range,
+                            num_event_init,
+                        ),
+                    ]
+                ).T
+            elif config["dims"] == ["x(km)", "y(km)"]:
+                centers_init = np.vstack(
+                    [
+                        np.ones(num_event_init) * np.mean(config["x(km)"]),
+                        np.ones(num_event_init) * np.mean(config["y(km)"]),
+                        np.linspace(
+                            data_[:, 0].min() - 0.1 * time_range,
+                            data_[:, 0].max() + 0.1 * time_range,
+                            num_event_init,
+                        ),
+                    ]
+                ).T
+            elif config["dims"] == ["x(km)"]:
+                centers_init = np.vstack(
+                    [
+                        np.ones(num_event_init) * np.mean(config["x(km)"]),
+                        np.linspace(
+                            data_[:, 0].min() - 0.1 * time_range,
+                            data_[:, 0].max() + 0.1 * time_range,
+                            num_event_init,
+                        ),
+                    ]
+                ).T
+            else:
+                raise(ValueError("Unsupported dims"))
 
         ## run clustering
         mean_precision_prior = 0.01 / time_range
@@ -160,7 +235,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
             ).fit(data_)
         elif method == "GMM":
             gmm = GaussianMixture(
-                n_components=len(centers_init),
+                n_components=len(centers_init)+1,
                 init_params="centers",
                 centers_init=centers_init.copy(),
                 station_locs=locs_,
