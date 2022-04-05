@@ -1,9 +1,0 @@
-*.txt
-*.json
-*.csv
-*.dat
-*.swp
-data/
-2019.catalog
-comparison/*pdf
-comparison/*png
