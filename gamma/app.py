@@ -11,7 +11,7 @@ from kafka import KafkaProducer
 from pydantic import BaseModel
 
 from gamma import BayesianGaussianMixture, GaussianMixture
-from gamma.utils import association, convert_picks_csv, from_seconds, to_seconds
+from gamma.utils import convert_picks_csv, association, from_seconds
 
 # Kafak producer
 use_kafka = False
@@ -57,13 +57,21 @@ def default_config(config):
     if "use_dbscan" not in config:
         config["use_dbscan"] = True
     if "dbscan_eps" not in config:
-        config["dbscan_eps"] = 6
+        config["dbscan_eps"] = 30.0
     if "dbscan_min_samples" not in config:
         config["dbscan_min_samples"] = 3
+    if "method" not in config:
+        config["method"] = "BGMM"
     if "oversample_factor" not in config:
-        config["oversample_factor"] = 10
+        config["oversample_factor"] = 5
     if "min_picks_per_eq" not in config:
         config["min_picks_per_eq"] = 10
+    if "max_sigma11" not in config:
+        config["max_sigma11"] = 2.0
+    if "max_sigma22" not in config:
+        config["max_sigma22"] = 1.0
+    if "max_sigma12" not in config:
+        config["max_sigma12"] = 1.0
     if "dims" not in config:
         config["dims"] = ["x(km)", "y(km)", "z(km)"]
     return config
@@ -109,43 +117,30 @@ def run_gamma(data, config, stations):
     event_idx0 = 0  ## current earthquake index
     assignments = []
     if (len(picks) > 0) and (len(picks) < 5000):
-        data, locs, phase_type, phase_weight, phase_index = convert_picks_csv(picks, stations, config)
-        catalogs, assignments = association(
-            data, locs, phase_type, phase_weight, len(stations), phase_index, event_idx0, config
-        )
+        catalogs, assignments = association(picks, stations, config, event_idx0, config["method"])
         event_idx0 += len(catalogs)
     else:
         catalogs = []
-        picks["time_idx"] = picks["timestamp"].apply(lambda x: x.strftime("%Y-%m-%dT%H"))  ## process by hours
         for hour in sorted(list(set(picks["time_idx"]))):
             picks_ = picks[picks["time_idx"] == hour]
             if len(picks_) == 0:
                 continue
-            data, locs, phase_type, phase_weight, phase_index = convert_picks_csv(picks_, stations, config)
-            catalog, assign = association(
-                data, locs, phase_type, phase_weight, len(stations), phase_index, event_idx0, config
-            )
+            catalog, assign = association(picks_, stations, config, event_idx0, config["method"])
             event_idx0 += len(catalog)
             catalogs.extend(catalog)
             assignments.extend(assign)
 
     ## create catalog
     print(catalogs)
-    catalogs = pd.DataFrame(catalogs, columns=["time(s)"] + config["dims"] + ["magnitude", "covariance"])
+    catalogs = pd.DataFrame(catalogs, columns=["time(s)"] + config["dims"] + ["magnitude", "sigma_time", "sigma_amp", "cov_time_amp",  "event_idx", "prob_gamma"])
     catalogs["time"] = catalogs["time(s)"].apply(lambda x: from_seconds(x))
     catalogs["longitude"] = catalogs["x(km)"].apply(lambda x: x / config["degree2km"] + config["center"][0])
     catalogs["latitude"] = catalogs["y(km)"].apply(lambda x: x / config["degree2km"] + config["center"][1])
     catalogs["depth(m)"] = catalogs["z(km)"].apply(lambda x: x * 1e3)
-    catalogs["event_idx"] = range(event_idx0)
-    if config["use_amplitude"]:
-        catalogs["covariance"] = catalogs["covariance"].apply(lambda x: f"{x[0][0]:.3f},{x[1][1]:.3f},{x[0][1]:.3f}")
-    else:
-        catalogs["covariance"] = catalogs["covariance"].apply(lambda x: f"{x[0][0]:.3f}")
-    # catalogs.drop(columns=["x(km)", "y(km)", "z(km)", "time(s)"], inplace=True)
-    catalogs = catalogs[['time', 'magnitude', 'longitude', 'latitude', 'depth(m)', 'covariance', "event_idx"]]    
+    catalogs = catalogs[['time', 'magnitude', 'longitude', 'latitude', 'depth(m)', 'sigma_time', 'sigma_amp', 'prob_gamma', "event_idx"]]
 
     ## add assignment to picks
-    assignments = pd.DataFrame(assignments, columns=["pick_idx", "event_idx", "prob_gmma"])
+    assignments = pd.DataFrame(assignments, columns=["pick_idx", "event_idx", "prob_gamma"])
     picks_gamma = picks.join(assignments.set_index("pick_idx")).fillna(-1).astype({'event_idx': int})
     picks_gamma["timestamp"] = picks_gamma["timestamp"].apply(lambda x: x.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3])
     if "time_idx" in picks_gamma:
@@ -210,7 +205,7 @@ def predict(data: Data):
     if use_kafka:
         print("Push events to kafka...")
         for event in catalogs.to_dict(orient="records"):
-            producer.send('gmma_events', key=event["time"], value=event)
+            producer.send('gamma_events', key=event["time"], value=event)
 
     return {"catalog": catalogs.to_dict(orient="records"), "picks": picks_gamma.to_dict(orient="records")}
 
