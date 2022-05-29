@@ -80,8 +80,12 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
         time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
         ## initialization with 5 horizontal points and N//5 time points
-        initial_mode = "one_point"
+        # initial_mode = "one_point"
         # initial_mode = "five_points"
+        if "initial_mode" in config:
+            initial_mode = config["initial_mode"]
+        else:
+            initial_mode = "one_point"
         if initial_mode == "five_points":
             num_event_loc_init = 5
             if "num_event_init" in config:
