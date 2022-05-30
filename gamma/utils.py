@@ -323,7 +323,15 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
 
                 gmm.covariances_[i, 1, 1] = np.mean((diff_a[idx_a])**2)
 
+            if "min_p_picks_per_eq" in config:
+                if len(tmp_data[idx_filter & (tmp_phase_type=="p")]) < config["min_p_picks_per_eq"]:
+                    continue
+            if "min_s_picks_per_eq" in config:
+                if len(tmp_data[idx_filter & (tmp_phase_type=="s")]) < config["min_s_picks_per_eq"]:
+                    continue
+
             event = {
+                "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
                 "time(s)": gmm.centers_[i, len(config["dims"])],
                 "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
                 # "covariance": gmm.covariances_[i, ...],
