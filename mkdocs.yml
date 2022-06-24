@@ -13,8 +13,8 @@ nav:
 theme:
   name: 'material'
 plugins:
-  - mkdocs-jupyter
-    ignore_h1_titles: True
+  - mkdocs-jupyter:
+      ignore_h1_titles: True
 extra:
   analytics:
     provider: google
