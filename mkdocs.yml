@@ -9,6 +9,7 @@ nav:
     - Interactive Example: example_interactive.ipynb
     - Synthetic Example: example_synthetic.ipynb
     - PhaseNet Example: example_phasenet.ipynb
+    - Seisbench Example: example_seisbench.ipynb
 theme:
   name: 'material'
 plugins:

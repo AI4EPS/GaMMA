@@ -39,6 +39,10 @@ See details in the [notebook](https://github.com/wayneweiqiang/GaMMA/blob/master
 
 See details in the [notebook](https://github.com/wayneweiqiang/GaMMA/blob/master/docs/example_phasenet.ipynb): [example_phasenet.ipynb](example_phasenet.ipynb)
 
+- Real Example using [Seisbench](https://github.com/seisbench/seisbench)
+
+See details in the [notebook](https://github.com/seisbench/seisbench/blob/main/examples/03c_catalog_seisbench_gamma.ipynb): [example_seisbench.ipynb](example_seisbench.ipynb)
+
 ![Associaiton result](https://raw.githubusercontent.com/wayneweiqiang/GaMMA/master/docs/assets/2019-07-04T18-02-01.074.png)
 
 More examples can be found in the earthquake detection workflow -- [QuakeFlow](https://wayneweiqiang.github.io/QuakeFlow/)
