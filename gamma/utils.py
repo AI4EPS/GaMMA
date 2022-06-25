@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from datetime import datetime
 from sklearn.cluster import DBSCAN
 
 from ._gaussian_mixture import GaussianMixture, calc_time, calc_amp
@@ -15,12 +16,17 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime(
 
 
 def convert_picks_csv(picks, stations, config):
-    t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
+    # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
+    if type(picks["timestamp"].iloc[0]) is str:
+        picks.loc[:, "timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
+    t = picks["timestamp"].apply(lambda x: x.tz_localize('UTC').timestamp()).to_numpy()
+    timestamp0 = np.min(t)
+    t = t - timestamp0
     if config["use_amplitude"]:
-        a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy()
+        a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy() ##cm/s
         data = np.stack([t, a]).T
     else:
-        data = t[:, np.newaxis]  
+        data = t[:, np.newaxis]
     meta = stations.merge(picks["id"], how="right", on="id")
     locs = meta[config["dims"]].to_numpy()
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
@@ -33,12 +39,13 @@ def convert_picks_csv(picks, stations, config):
         phase_type[~nan_idx],
         phase_weight[~nan_idx],
         picks.index.to_numpy()[~nan_idx],
-        pick_station_id[~nan_idx]
+        pick_station_id[~nan_idx],
+        timestamp0
     )
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,):
 
-    data, locs, phase_type, phase_weight, pick_idx, pick_station_id = convert_picks_csv(picks, stations, config)
+    data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(picks, stations, config)
 
     num_sta = len(stations)
     vel = config["vel"] if "vel" in config else {"p":6.0, "s":6.0/1.73}
@@ -331,7 +338,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
                     continue
 
             event = {
-                "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
+                # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
+                "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])]+timestamp0).isoformat(timespec='milliseconds'),
                 "time(s)": gmm.centers_[i, len(config["dims"])],
                 "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
                 # "covariance": gmm.covariances_[i, ...],
