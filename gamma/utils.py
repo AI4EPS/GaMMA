@@ -50,7 +50,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
     num_sta = len(stations)
     vel = config["vel"] if "vel" in config else {"p":6.0, "s":6.0/1.73}
     
-    if config["use_dbscan"]:
+    if ("use_dbscan" in config) and config["use_dbscan"]:
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
             np.hstack([data[:, 0:1], locs[:, :2] / vel["p"]])
         )
