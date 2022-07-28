@@ -18,15 +18,17 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
 ## 3. Examples
 
 - Hyperparameters:
-  - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as in the neighborhood of the other. See details in [DBSCAN](https://https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
-  - **dbscan_min_samples** (default = 3): The number of samples (or total weight) in a neighborhood for a point to be considered as a core point.
-  - **min_picks_per_eq** (default = 10): Minimum picks for associated earthquakes.
-  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations) * (oversampling factor).
   - **use_amplitude** (default = True): If using amplitude information.
-  - **z(km)** (default = [0, 40]): The range of earthquake depth during association. 
-  - **xlim_degree**, **ylim_degree**: The longitude and latitude range of the research region.
-
-Note: DBSCAN is used to cut picks into small windows to speedup association.
+  - **use_dbscan**: If using dbscan to cut a long sequence of picks into segments. Using DBSCAN can significantly speed up associaiton using small windows. 
+  - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as a neighbor of the other. See details in [DBSCAN](https://https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
+  - **dbscan_min_samples** (default = 3): The number of samples in a neighborhood for a point to be considered as a core point. See details in [DBSCAN](https://https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
+  - **min_picks_per_eq**: Minimum picks for associated earthquakes. We can also specify minimum P or S picks:
+  	- **min_p_picks_per_eq**: Minimum P-picks for associated earthquakes.
+  	- **min_s_picks_per_eq**: Minimum S-picks for associated earthquakes.
+  - **max_sigma11**: Max phase time residual (s)
+  - **max_sigma22**: Max phase amplitude residual (in *log* scale)
+  - **max_sigma12**: Max covariance term. (Usually not used)
+  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations) * (oversampling factor).
 
 
 - Synthetic Example
