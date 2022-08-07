@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 
 from ._gaussian_mixture import GaussianMixture, calc_time, calc_amp
 from ._bayesian_mixture import BayesianGaussianMixture
@@ -43,7 +44,7 @@ def convert_picks_csv(picks, stations, config):
         timestamp0
     )
 
-def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,):
+def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(picks, stations, config)
 
@@ -65,6 +66,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
     assignment = []  ## from picks to events
     event_idx = event_idx0
 
+    pbar = tqdm(total=len(data), desc="Association")
     for k in unique_labels:
 
         if k == -1:
@@ -83,6 +85,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
 
         if pbar is not None:
             pbar.set_description(f"Process {len(data_)} picks")
+            pbar.update(len(data_))
 
         time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
