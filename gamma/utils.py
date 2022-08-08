@@ -343,14 +343,13 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             event = {
                 # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
                 "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])]+timestamp0).isoformat(timespec='milliseconds'),
-                "time(s)": gmm.centers_[i, len(config["dims"])],
+                # "time(s)": gmm.centers_[i, len(config["dims"])],
                 "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
-                # "covariance": gmm.covariances_[i, ...],
                 "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
                 "sigma_amp":  np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
                 "cov_time_amp":  gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
-                "prob_gamma": prob_eq[i],
-                "event_idx": event_idx,
+                "gamma_score": prob_eq[i],
+                "event_index": event_idx,
             }
             for j, k in enumerate(config["dims"]):  ## add location
                 event[k] = gmm.centers_[i, j]
