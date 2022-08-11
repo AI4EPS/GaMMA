@@ -9,10 +9,12 @@ nav:
     - Interactive Example: example_interactive.ipynb
     - Synthetic Example: example_synthetic.ipynb
     - PhaseNet Example: example_phasenet.ipynb
+    - Seisbench Example: example_seisbench.ipynb
 theme:
   name: 'material'
 plugins:
-  - mkdocs-jupyter
+  - mkdocs-jupyter:
+      ignore_h1_titles: True
 extra:
   analytics:
     provider: google

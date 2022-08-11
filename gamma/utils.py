@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
+from datetime import datetime
 from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 
 from ._gaussian_mixture import GaussianMixture, calc_time, calc_amp
 from ._bayesian_mixture import BayesianGaussianMixture
@@ -15,12 +17,17 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime(
 
 
 def convert_picks_csv(picks, stations, config):
-    t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
+    # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
+    if type(picks["timestamp"].iloc[0]) is str:
+        picks.loc[:, "timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
+    t = picks["timestamp"].apply(lambda x: x.tz_localize('UTC').timestamp()).to_numpy()
+    timestamp0 = np.min(t)
+    t = t - timestamp0
     if config["use_amplitude"]:
-        a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy()
+        a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy() ##cm/s
         data = np.stack([t, a]).T
     else:
-        data = t[:, np.newaxis]  
+        data = t[:, np.newaxis]
     meta = stations.merge(picks["id"], how="right", on="id")
     locs = meta[config["dims"]].to_numpy()
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
@@ -33,17 +40,18 @@ def convert_picks_csv(picks, stations, config):
         phase_type[~nan_idx],
         phase_weight[~nan_idx],
         picks.index.to_numpy()[~nan_idx],
-        pick_station_id[~nan_idx]
+        pick_station_id[~nan_idx],
+        timestamp0
     )
 
-def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,):
+def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
-    data, locs, phase_type, phase_weight, pick_idx, pick_station_id = convert_picks_csv(picks, stations, config)
+    data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(picks, stations, config)
 
     num_sta = len(stations)
     vel = config["vel"] if "vel" in config else {"p":6.0, "s":6.0/1.73}
     
-    if config["use_dbscan"]:
+    if ("use_dbscan" in config) and config["use_dbscan"]:
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
             np.hstack([data[:, 0:1], locs[:, :2] / vel["p"]])
         )
@@ -58,6 +66,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
     assignment = []  ## from picks to events
     event_idx = event_idx0
 
+    pbar = tqdm(total=len(data), desc="Association")
     for k in unique_labels:
 
         if k == -1:
@@ -76,6 +85,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
 
         if pbar is not None:
             pbar.set_description(f"Process {len(data_)} picks")
+            pbar.update(len(data_))
 
         time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
@@ -331,15 +341,15 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", pbar=None,
                     continue
 
             event = {
-                "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
-                "time(s)": gmm.centers_[i, len(config["dims"])],
+                # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
+                "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])]+timestamp0).isoformat(timespec='milliseconds'),
+                # "time(s)": gmm.centers_[i, len(config["dims"])],
                 "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
-                # "covariance": gmm.covariances_[i, ...],
                 "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
                 "sigma_amp":  np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
                 "cov_time_amp":  gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
-                "prob_gamma": prob_eq[i],
-                "event_idx": event_idx,
+                "gamma_score": prob_eq[i],
+                "event_index": event_idx,
             }
             for j, k in enumerate(config["dims"]):  ## add location
                 event[k] = gmm.centers_[i, j]
