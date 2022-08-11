@@ -4,6 +4,7 @@ GMMA.egg-info
 figures
 ._.DS_Store
 .DS_Store
+.ipynb_checkpoints
 
 docs/test_data.zip*
 docs/test_data
