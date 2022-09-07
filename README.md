@@ -1,4 +1,4 @@
-# *GaMMA*: *Ga*ussian *M*ixture *M*odel *A*ssociation 
+# *GaMMA*: *Ga*ussian *M*ixture *M*odel *A*ssociator
 
 [![](https://github.com/wayneweiqiang/GaMMA/workflows/documentation/badge.svg)](https://wayneweiqiang.github.io/GaMMA)
 [![](https://github.com/wayneweiqiang/GaMMA/workflows/wheels/badge.svg)](https://wayneweiqiang.github.io/GaMMA)
