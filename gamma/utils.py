@@ -299,13 +299,13 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             tmp_locs = locs_[pred == i]
             tmp_pick_station_id = pick_station_id_[pred == i]
             tmp_phase_type = phase_type_[pred == i]
-            if len(tmp_data) < config["min_picks_per_eq"]:
+            if (len(tmp_data) == 0) or (len(tmp_data) < config["min_picks_per_eq"]):
                 continue
 
             ## filter by time
             t_ = calc_time(gmm.centers_[i : i + 1, : len(config["dims"]) + 1], tmp_locs, tmp_phase_type, vel=vel)
             diff_t = np.abs(t_ - tmp_data[:, 0:1])
-            idx_t = (diff_t < config["max_sigma11"]).squeeze()
+            idx_t = (diff_t < config["max_sigma11"]).squeeze(axis=1)
             idx_filter = idx_t
             if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
                 continue
