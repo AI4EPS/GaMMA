@@ -47,4 +47,4 @@ See details in the [notebook](https://github.com/seisbench/seisbench/blob/main/e
 
 ![Associaiton result](https://raw.githubusercontent.com/wayneweiqiang/GaMMA/master/docs/assets/2019-07-04T18-02-01.074.png)
 
-More examples can be found in the earthquake detection workflow -- [QuakeFlow](https://wayneweiqiang.github.io/QuakeFlow/)
+More examples can be found in the earthquake detection workflow -- [QuakeFlow](https://ai4eps.github.io/QuakeFlow/)
