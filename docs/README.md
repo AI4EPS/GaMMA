@@ -1,7 +1,7 @@
-# *GaMMA*: *Ga*ussian *M*ixture *M*odel *A*ssociator
+# [*GaMMA*: *Ga*ussian *M*ixture *M*odel *A*ssociator](https://ai4eps.github.io/GaMMA)
 
-[![](https://github.com/wayneweiqiang/GaMMA/workflows/documentation/badge.svg)](https://wayneweiqiang.github.io/GaMMA)
-[![](https://github.com/wayneweiqiang/GaMMA/workflows/wheels/badge.svg)](https://wayneweiqiang.github.io/GaMMA)
+[![](https://github.com/wayneweiqiang/GaMMA/workflows/documentation/badge.svg)](https://ai4eps.github.io/GaMMA)
+[![](https://github.com/wayneweiqiang/GaMMA/workflows/wheels/badge.svg)](https://ai4eps.github.io/GaMMA)
 
 ## 1. Install
 ```bash
