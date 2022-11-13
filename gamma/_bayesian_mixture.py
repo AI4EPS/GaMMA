@@ -501,9 +501,9 @@ class BayesianGaussianMixture(BaseMixture):
             else:
                 raise ValueError(f"n_features = {n_features} > 2!")
 
-        dist = np.linalg.norm(means - X, axis=-1)
-        resp = np.exp(-dist).T
-        resp /= resp.sum(axis=1)[:, np.newaxis]
+        dist = np.linalg.norm(means - X, axis=-1) # (n_components, n_samples, n_features) -> (n_components, n_samples)
+        resp = np.exp(-dist/np.median(dist, axis=0, keepdims=True)).T 
+        resp /= np.sum(resp, axis=1, keepdims=True) # (n_components, n_samples)
 
         return resp
 
