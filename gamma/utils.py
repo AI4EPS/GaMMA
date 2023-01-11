@@ -54,8 +54,11 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         picks, stations, config
     )
 
-    num_sta = len(stations)
     vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
+    if "covariance_prior" in config:
+        covariance_prior = config["covariance_prior"]
+    else:
+        covariance_prior = [5.0, 5.0]
 
     if ("use_dbscan" in config) and config["use_dbscan"]:
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
@@ -192,59 +195,42 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
         ## initialization with 1 horizontal center points and N time points
         if (initial_mode == "one_point") or (len(data_) < len(centers_init)):
+
+            num_sta = len(np.unique(locs_, axis=0))
             if "num_event_init" in config:
                 num_event_init = config["num_event_init"]
             else:
                 num_event_init = min(
-                    max(int(len(data_) / num_sta * config["oversample_factor"]), 3),
+                    max(int(len(data_) / num_sta * config["oversample_factor"]), 1),
                     len(data_),
                 )
+            x_init = np.ones(num_event_init) * np.mean(config["x(km)"])
+            y_init = np.ones(num_event_init) * np.mean(config["y(km)"])
+            z_init = np.ones(num_event_init) * np.mean(config["z(km)"])
+            t_init = np.sort(data_[:, 0])[::len(data_[:, 0]) // num_event_init][:num_event_init]
             if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
                 centers_init = np.vstack(
-                    [
-                        np.ones(num_event_init) * np.mean(config["x(km)"]),
-                        np.ones(num_event_init) * np.mean(config["y(km)"]),
-                        np.ones(num_event_init) * np.mean(config["z(km)"]),
-                        np.linspace(
-                            data_[:, 0].min() - 0.1 * time_range,
-                            data_[:, 0].max() + 0.1 * time_range,
-                            num_event_init,
-                        ),
-                    ]
+                    [ x_init, y_init, z_init, t_init]
                 ).T
             elif config["dims"] == ["x(km)", "y(km)"]:
                 centers_init = np.vstack(
-                    [
-                        np.ones(num_event_init) * np.mean(config["x(km)"]),
-                        np.ones(num_event_init) * np.mean(config["y(km)"]),
-                        np.linspace(
-                            data_[:, 0].min() - 0.1 * time_range,
-                            data_[:, 0].max() + 0.1 * time_range,
-                            num_event_init,
-                        ),
-                    ]
+                    [x_init, y_init, t_init]
                 ).T
             elif config["dims"] == ["x(km)"]:
                 centers_init = np.vstack(
-                    [
-                        np.ones(num_event_init) * np.mean(config["x(km)"]),
-                        np.linspace(
-                            data_[:, 0].min() - 0.1 * time_range,
-                            data_[:, 0].max() + 0.1 * time_range,
-                            num_event_init,
-                        ),
-                    ]
+                    [x_init, t_init]
                 ).T
             else:
                 raise (ValueError("Unsupported dims"))
 
         ## run clustering
         mean_precision_prior = 0.01 / time_range
+
         if not config["use_amplitude"]:
-            covariance_prior = np.array([[1.0]]) * 5
+            covariance_prior = np.array([[covariance_prior[0]]])
             data_ = data_[:, 0:1]
         else:
-            covariance_prior = np.array([[1.0, 0.0], [0.0, 0.5]]) * 5
+            covariance_prior = np.array([[covariance_prior[0], 0.0], [0.0, covariance_prior[1]]])
 
         if method == "BGMM":
             gmm = BayesianGaussianMixture(
