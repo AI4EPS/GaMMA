@@ -56,9 +56,9 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
     if "covariance_prior" in config:
-        covariance_prior = config["covariance_prior"]
+        covariance_prior_pre = config["covariance_prior"]
     else:
-        covariance_prior = [5.0, 5.0]
+        covariance_prior_pre = [5.0, 5.0]
 
     if ("use_dbscan" in config) and config["use_dbscan"]:
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
@@ -227,10 +227,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         mean_precision_prior = 0.01 / time_range
 
         if not config["use_amplitude"]:
-            covariance_prior = np.array([[covariance_prior[0]]])
+            covariance_prior = np.array([[covariance_prior_pre[0]]])
             data_ = data_[:, 0:1]
         else:
-            covariance_prior = np.array([[covariance_prior[0], 0.0], [0.0, covariance_prior[1]]])
+            covariance_prior = np.array([[covariance_prior_pre[0], 0.0], [0.0, covariance_prior_pre[1]]])
 
         if method == "BGMM":
             gmm = BayesianGaussianMixture(
