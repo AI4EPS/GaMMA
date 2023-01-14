@@ -7,6 +7,7 @@ from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture, calc_amp, calc_time
+from .eikonal import eikonal_solve
 
 to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
@@ -48,6 +49,28 @@ def convert_picks_csv(picks, stations, config):
     )
 
 
+def generate_eikonal_var(config, vel):
+    xlim = config['x(km)']
+    ylim = config['y(km)']
+    zlim = config['z(km)']
+    if "eikonal_grid" in config:
+        h = config["eikonal_grid"]
+    else:
+        h = 0.3
+    
+    rlim = [0, ((xlim[1] - xlim[0]) ** 2 + (ylim[1] - ylim[0]) ** 2) ** 0.5]
+
+    rx = np.arange(rlim[0], rlim[1] + h, h)
+    zx = np.arange(zlim[0], zlim[1] + h, h)
+
+    rgrid, zgrid = np.meshgrid(rx, zx, indexing="ij")
+
+    eikonal_var = {'rx': rx, 'zs': zx, 'h': h, 'rx': rx, 'zx': zx}
+
+    return eikonal_var
+
+
+
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
@@ -55,6 +78,13 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     )
 
     vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
+    if np.isinstance(vel['p'], np.ndarray) and len(vel) == 3:
+        eikonal_var = generate_eikonal_var(config, vel)
+    elif np.isinstance(vel['p'], np.ndarray) and len(vel) < 3:
+        raise('Need depth, vp, vs for eikonal')
+    else:
+        eikonal_var = None
+
     if "covariance_prior" in config:
         covariance_prior_pre = config["covariance_prior"]
     else:

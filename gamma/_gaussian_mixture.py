@@ -7,6 +7,7 @@
 import numpy as np
 
 from scipy import linalg, optimize
+from .eikonal import eikonal_solve, invert_location
 
 from ._base import BaseMixture, _check_shape
 from sklearn.utils import check_array
@@ -253,12 +254,33 @@ def _estimate_gaussian_covariances_spherical(resp, X, nk, means, reg_covar):
                                                means, reg_covar).mean(1)
 
 
-def calc_time(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
+def calc_time(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}, eikonal=None):
     """
     center: (loc, t)
     """
-    v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
-    t = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True) / v + center[:,-1:]
+    if eikonal is not None:
+        r = np.sqrt(np.sum((center[:, :2] - station_locs[:, :2]) ** 2, axis=-1))  # (nsta, 3)
+        z = np.abs(center[:, 2] - station_locs[:, 2])  # (nsta, 1)
+
+        r = r[:, np.newaxis, np.newaxis]
+        z = z[:, np.newaxis, np.newaxis]
+        h = eikonal['h']
+        sigma = 2 * h
+        magn = (
+            1.0
+            / (2.0 * np.pi * sigma)
+            * np.exp(-(((eikonal['rgrid'] - r) / (np.sqrt(2 * sigma) * h)) ** 2 + ((eikonal['zgrid'] - z) / (np.sqrt(2 * sigma) * eikonal['h'])) ** 2))
+        )
+
+        tp = np.sum(eikonal['up'] * magn, axis=(-1, -2))
+        ts = np.sum(eikonal['us'] * magn, axis=(-1, -2))
+        mask = np.vstack([tp, ts, phase_type])
+
+        t = np.where(mask[2]=='P', mask[0], mask[1]) + center[:,-1:]
+
+    else:
+        v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
+        t = np.linalg.norm(center[:,:-1] - station_locs, axis=-1, keepdims=True) / v + center[:,-1:]
     return t
 
 def calc_mag(data, center, station_locs, weight, min=-2, max=8):
@@ -363,18 +385,21 @@ def loss_and_grad(vars, data, station_locs, phase_type, weight, sigma=1, vel={"p
     return loss, J_
 
 
-def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}): 
+def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}, eikonal=None): 
+    if eikonal is not None:
+        loc = invert_location(data, vars[-1], vars[:-1], station_locs, phase_type, weight, eikonal['up'], eikonal['us'], eikonal['h'], eikonal['rgrid'], eikonal['zgrid'], 2*eikonal['h'], bounds=bounds)
+        return loc
 
-    opt = optimize.minimize(loss_and_grad, np.squeeze(vars), method="L-BFGS-B", jac=True,
+    else:
+        opt = optimize.minimize(loss_and_grad, np.squeeze(vars), method="L-BFGS-B", jac=True,
                             args=(data, station_locs, phase_type, weight, 1, vel),
                             options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
                             bounds=bounds)
-
-    return opt.x[np.newaxis, :]
+        return opt.x[np.newaxis, :]
 
 
 def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_locs, phase_type, 
-                                  vel={"p":6.0, "s":6.0/1.75}, loss_type="l2", centers_prev=None, bounds=None):
+                                  vel={"p":6.0, "s":6.0/1.75}, loss_type="l2", eikonal=None, centers_prev=None, bounds=None):
     """Estimate the Gaussian distribution parameters.
 
     Parameters
@@ -412,21 +437,21 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_l
 
     if centers_prev is None:
         centers_prev = np.dot(resp.T, np.hstack([station_locs, X])) / nk[:, np.newaxis]
-    centers = np.zeros_like(centers_prev) #x, y, t, amp, ...
+    centers = np.zeros_like(centers_prev) #x, y, z, t
     
     for i in range(len(centers_prev)):
         if n_features == 1:
             if loss_type == "l2":
                 centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
-                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel)
+                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel, eikonal=eikonal)
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
         elif n_features == 2:
             if loss_type == "l2":
                 centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
-                centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel)
+                centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel, eikonal=eikonal)
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
             centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs, resp[:,i:i+1])
@@ -436,9 +461,9 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_l
     means = np.zeros([resp.shape[1], X.shape[0], X.shape[1]])
     for i in range(len(centers)):
         if n_features == 1:
-            means[i, :, :] = calc_time(centers[i:i+1, :], station_locs, phase_type, vel=vel)
+            means[i, :, :] = calc_time(centers[i:i+1, :], station_locs, phase_type, vel=vel, eikonal=eikonal)
         elif n_features == 2:
-            means[i, :, 0:1] = calc_time(centers[i:i+1, :-1], station_locs, phase_type, vel=vel)
+            means[i, :, 0:1] = calc_time(centers[i:i+1, :-1], station_locs, phase_type, vel=vel, eikonal=eikonal)
             means[i, :, 1:2] = calc_amp(centers[i:i+1, -1:], centers[i:i+1, :-1], station_locs)
         else:
             raise ValueError(f"n_features = {n_features} > 2!")
@@ -606,6 +631,29 @@ def _estimate_log_gaussian_prob(X, means, precisions_chol, covariance_type):
                     2 * np.dot(X, means.T * precisions) +
                     np.outer(row_norms(X, squared=True), precisions))
     return -.5 * (n_features * np.log(2 * np.pi) + log_prob) + log_det
+
+
+# Eikonal
+def _solve_eikonal(eikonal_var, vel):
+    rx = eikonal_var['rx']
+    zx = eikonal_var['zx']
+    h = eikonal_var['h']
+
+    m = len(rx)
+    n = len(zx)
+
+    vp = np.tile(np.interp(zx, vel['depth'], vel['p']), (m, 1))
+    vs = np.tile(np.interp(zx, vel['depth'], vel['s']), (m, 1))
+
+    up = 1000 * np.ones((m, n))
+    up[0, 0] = 0.0
+    up = eikonal_solve(up, vp, h)
+
+    us = 1000 * np.ones((m, n))
+    us[0, 0] = 0.0
+    us = eikonal_solve(us, vs, h)
+
+    return up, us
 
 
 class GaussianMixture(BaseMixture):
@@ -782,7 +830,7 @@ class GaussianMixture(BaseMixture):
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
                  random_state=None, warm_start=False, 
                  station_locs=None, phase_type=None, phase_weight=None, 
-                 vel={"p":6.0, "s":6.0/1.75},
+                 vel={"p":6.0, "s":6.0/1.75}, eikonal_var = None,
                  dummy_comp=False, dummy_prob=0.01, dummy_quantile=0.1,
                  loss_type="l1", bounds=None, max_covar=None,
                  verbose=0, verbose_interval=10):
@@ -811,6 +859,12 @@ class GaussianMixture(BaseMixture):
         self.loss_type = loss_type
         self.bounds = bounds
         self.max_covar = max_covar
+        if eikonal_var is not None:
+            eikonal_var['up'], eikonal_var['us'] = _solve_eikonal(eikonal_var, vel)
+            self.eikonal = eikonal_var
+        else:
+            self.eikonal = None
+
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -855,9 +909,9 @@ class GaussianMixture(BaseMixture):
         means = np.zeros([self.n_components, n_samples, n_features])
         for i in range(len(self.centers_init)):
             if n_features == 1: #(time,)
-                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, eikonal=self.eikonal)
             elif n_features == 2: #(time, amp)
-                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type)
+                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, eikonal=self.eikonal)
                 means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
             else:
                 raise ValueError(f"n_features = {n_features} > 2!")
@@ -921,7 +975,7 @@ class GaussianMixture(BaseMixture):
         self.weights_, self.means_, self.covariances_, self.centers_ = (
             _estimate_gaussian_parameters(
                 X, np.exp(log_resp), self.reg_covar, self.covariance_type, 
-                self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
+                self.station_locs, self.phase_type, vel=self.vel, eikonal=None, loss_type=self.loss_type,
                 centers_prev=self.centers_, bounds=self.bounds))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(

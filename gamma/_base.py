@@ -10,6 +10,7 @@ from time import time
 
 import numpy as np
 from scipy.special import logsumexp
+from .eikonal import eikonal_solve
 
 from sklearn import cluster
 from sklearn.base import BaseEstimator
@@ -60,6 +61,29 @@ def _check_X(X, n_components=None, n_features=None, ensure_min_samples=1):
                          "but got %d features"
                          % (n_features, X.shape[-1]))
     return X
+
+
+# Eikonal
+def _solve_eikonal(eikonal_var, vel):
+    rx = eikonal_var['rx']
+    zx = eikonal_var['zx']
+    h = eikonal_var['h']
+
+    m = len(rx)
+    n = len(zx)
+
+    vp = np.tile(np.interp(zx, vel['depth'], vel['p']), (m, 1))
+    vs = np.tile(np.interp(zx, vel['depth'], vel['s']), (m, 1))
+
+    up = 1000 * np.ones((m, n))
+    up[0, 0] = 0.0
+    up = eikonal_solve(up, vp, h)
+
+    us = 1000 * np.ones((m, n))
+    us[0, 0] = 0.0
+    us = eikonal_solve(us, vs, h)
+
+    return up, us
 
 
 class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):

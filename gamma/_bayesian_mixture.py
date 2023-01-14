@@ -16,6 +16,7 @@ from ._gaussian_mixture import _compute_precision_cholesky
 from ._gaussian_mixture import _estimate_gaussian_parameters
 from ._gaussian_mixture import _estimate_log_gaussian_prob
 from ._gaussian_mixture import calc_time, calc_mag
+from ._gaussian_mixture import _solve_eikonal
 from sklearn.utils import check_array
 from sklearn.utils.validation import _deprecate_positional_args
 
@@ -62,7 +63,6 @@ def _log_wishart_norm(degrees_of_freedom, log_det_precisions_chol, n_features):
              degrees_of_freedom * n_features * .5 * math.log(2.) +
              np.sum(gammaln(.5 * (degrees_of_freedom -
                                   np.arange(n_features)[:, np.newaxis])), 0))
-
 
 class BayesianGaussianMixture(BaseMixture):
     """Variational Bayesian estimation of a Gaussian mixture.
@@ -319,7 +319,7 @@ class BayesianGaussianMixture(BaseMixture):
                  degrees_of_freedom_prior=None, covariance_prior=None,
                  random_state=None, warm_start=False, verbose=0,
                  station_locs=None, phase_type=None, phase_weight=None, centers_init=None,
-                 vel={"p":6.0, "s":6.0/1.75},
+                 vel={"p":6.0, "s":6.0/1.75}, eikonal_var = None,
                  dummy_comp=False, dummy_prob=0.01, dummy_quantile=0.1,
                  loss_type="l1", bounds=None, max_covar=None,
                  verbose_interval=10):
@@ -351,6 +351,12 @@ class BayesianGaussianMixture(BaseMixture):
         self.loss_type = loss_type
         self.bounds = bounds
         self.max_covar = max_covar
+        if eikonal_var is not None:
+            eikonal_var['up'], eikonal_var['us'] = _solve_eikonal(eikonal_var, vel)
+            self.eikonal = eikonal_var
+        else:
+            self.eikonal = None
+
 
     def _check_parameters(self, X):
         """Check that the parameters are well defined.
@@ -494,9 +500,9 @@ class BayesianGaussianMixture(BaseMixture):
         means = np.zeros([self.n_components, n_samples, n_features])
         for i in range(len(self.centers_init)):
             if n_features == 1: #(time,)
-                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
+                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel, eikonal=self.eikonal)
             elif n_features == 2: #(time, amp)
-                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
+                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel, eikonal=self.eikonal)
                 means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
             else:
                 raise ValueError(f"n_features = {n_features} > 2!")
@@ -518,7 +524,7 @@ class BayesianGaussianMixture(BaseMixture):
         """
         nk, xk, sk, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type,
-            self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
+            self.station_locs, self.phase_type, vel=self.vel, eikonal=self.eikonal, loss_type=self.loss_type, 
             centers_prev=None, bounds=self.bounds)
 
         self._estimate_weights(nk)
@@ -719,7 +725,7 @@ class BayesianGaussianMixture(BaseMixture):
 
         nk, xk, sk, self.centers_ = _estimate_gaussian_parameters(
             X, np.exp(log_resp), self.reg_covar, self.covariance_type,
-            self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
+            self.station_locs, self.phase_type, vel=self.vel, eikonal=self.eikonal, loss_type=self.loss_type, 
             centers_prev=self.centers_, bounds=self.bounds)
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)
