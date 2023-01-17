@@ -352,7 +352,8 @@ class BayesianGaussianMixture(BaseMixture):
         self.bounds = bounds
         self.max_covar = max_covar
         if eikonal_var is not None:
-            eikonal_var['up'], eikonal_var['us'] = _solve_eikonal(eikonal_var, vel)
+            if "up" not in eikonal_var:
+                eikonal_var["up"], eikonal_var["us"] = _solve_eikonal(eikonal_var, vel)
             self.eikonal = eikonal_var
         else:
             self.eikonal = None

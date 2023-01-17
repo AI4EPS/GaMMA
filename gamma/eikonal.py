@@ -71,7 +71,7 @@ def eikonal_solve(u, f, h):
         u = sweeping(u, f, h)
 
         err = np.max(np.abs(u - u_old))
-        print(f"Iteration {i}, Error = {err}")
+
         if err < 1e-6:
             break
 
@@ -126,11 +126,7 @@ def traveltime(vars_, station_locs, phase_type, up, us, h, rgrid, zgrid, sigma=1
     )
     tp = torch.sum(up * magn, dim=(-1, -2))
     ts = torch.sum(us * magn, dim=(-1, -2))
-
-    tt = torch.cat([tp, ts], dim=0)
-    mask = np.vstack([tp, ts, phase_type])
-    t = np.where(mask[2]=='P', mask[0], mask[1]) + center[:,-1:]
-
+    tt = torch.cat([tp[i].unsqueeze(0) if phase_type[i]=='p' else ts[i].unsqueeze(0) for i, _ in enumerate(phase_type)], 0)
 
     return tt
 
@@ -146,15 +142,13 @@ def invert_location(
     else:
         loc = loc_
         t0 = t0_
-
-    station_locs = torch.tensor(station_locs[:4, :], dtype=torch.float32)
+    station_locs = torch.tensor(station_locs, dtype=torch.float32)
     weight = torch.tensor(weight, dtype=torch.float32)
     data = torch.tensor(data, dtype=torch.float32)
     rgrid = torch.tensor(rgrid, dtype=torch.float32)
     zgrid = torch.tensor(zgrid, dtype=torch.float32)
     up = torch.tensor(up, dtype=torch.float32)
     us = torch.tensor(us, dtype=torch.float32)
-
     optimizer = optim.LBFGS(params=[t0_, loc_], max_iter=1000, line_search_fn="strong_wolfe")
 
     def closure():
@@ -172,4 +166,5 @@ def invert_location(
     else:
         loc = loc_
         t0 = t0_
-    return torch.cat((loc, t0), 1).detach().numpy()
+        
+    return torch.cat((loc.squeeze(0), t0), 0).detach().numpy()

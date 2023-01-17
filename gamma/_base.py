@@ -283,7 +283,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
 
                 change = lower_bound - prev_lower_bound
                 self._print_verbose_msg_iter_end(n_iter, change)
-
+                print(n_iter, change)
                 if abs(change) < self.tol:
                     self.converged_ = True
                     break

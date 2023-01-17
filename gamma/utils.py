@@ -49,7 +49,7 @@ def convert_picks_csv(picks, stations, config):
     )
 
 
-def generate_eikonal_var(config, vel):
+def generate_eikonal_var(config):
     xlim = config['x(km)']
     ylim = config['y(km)']
     zlim = config['z(km)']
@@ -58,6 +58,10 @@ def generate_eikonal_var(config, vel):
     else:
         h = 0.3
     
+    if "eikonal" in config:
+        up = config["eikonal"]["up"]
+        us = config["eikonal"]["us"]
+    
     rlim = [0, ((xlim[1] - xlim[0]) ** 2 + (ylim[1] - ylim[0]) ** 2) ** 0.5]
 
     rx = np.arange(rlim[0], rlim[1] + h, h)
@@ -65,7 +69,7 @@ def generate_eikonal_var(config, vel):
 
     rgrid, zgrid = np.meshgrid(rx, zx, indexing="ij")
 
-    eikonal_var = {'rx': rx, 'zs': zx, 'h': h, 'rx': rx, 'zx': zx}
+    eikonal_var = {'rx': rx, 'zx': zx, 'h': h, 'rgrid': rgrid, 'zgrid': zgrid, "up": up, "us": us}
 
     return eikonal_var
 
@@ -78,9 +82,9 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     )
 
     vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
-    if np.isinstance(vel['p'], np.ndarray) and len(vel) == 3:
-        eikonal_var = generate_eikonal_var(config, vel)
-    elif np.isinstance(vel['p'], np.ndarray) and len(vel) < 3:
+    if isinstance(vel['p'], np.ndarray) and len(vel) == 3:
+        eikonal_var = generate_eikonal_var(config)
+    elif isinstance(vel['p'], np.ndarray) and len(vel) < 3:
         raise('Need depth, vp, vs for eikonal')
     else:
         eikonal_var = None
@@ -91,9 +95,12 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         covariance_prior_pre = [5.0, 5.0]
 
     if ("use_dbscan" in config) and config["use_dbscan"]:
-        db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-            np.hstack([data[:, 0:1], locs[:, :2] / vel["p"]])
-        )
+        if isinstance(vel['p'], np.ndarray):
+            db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
+                np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])]))
+        else:
+            db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
+                np.hstack([data[:, 0:1], locs[:, :2] / vel["p"]]))
         # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(data[:, 0:1])
         labels = db.labels_
         unique_labels = set(labels)
@@ -274,6 +281,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 phase_type=phase_type_,
                 phase_weight=phase_weight_,
                 vel=vel,
+                eikonal_var=eikonal_var,
                 loss_type="l1",
                 bounds=config["bfgs_bounds"],
                 # max_covar=20 ** 2,
@@ -290,6 +298,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 phase_type=phase_type_,
                 phase_weight=phase_weight_,
                 vel=vel,
+                eikonal_var=eikonal_var,
                 loss_type="l1",
                 bounds=config["bfgs_bounds"],
                 # max_covar=20 ** 2,
@@ -319,7 +328,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 continue
 
             ## filter by time
-            t_ = calc_time(gmm.centers_[i : i + 1, : len(config["dims"]) + 1], tmp_locs, tmp_phase_type, vel=vel)
+            t_ = calc_time(gmm.centers_[i : i + 1, : len(config["dims"]) + 1], tmp_locs, tmp_phase_type, vel=vel, eikonal=gmm.eikonal)
             diff_t = np.abs(t_ - tmp_data[:, 0:1])
             idx_t = (diff_t < config["max_sigma11"]).squeeze(axis=1)
             idx_filter = idx_t
