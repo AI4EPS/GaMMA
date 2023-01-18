@@ -6,7 +6,7 @@
 
 import numpy as np
 
-from scipy import linalg, optimize
+from scipy import linalg, optimize, interpolate
 from .eikonal import eikonal_solve, invert_location
 
 from ._base import BaseMixture, _check_shape
@@ -259,22 +259,13 @@ def calc_time(center, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}, eik
     center: (loc, t)
     """
     if eikonal is not None:
+
         r = np.sqrt(np.sum((center[:, :2] - station_locs[:, :2]) ** 2, axis=-1))  # (nsta, 3)
         z = np.abs(center[:, 2] - station_locs[:, 2])  # (nsta, 1)
 
-        r = r[:, np.newaxis, np.newaxis]
-        z = z[:, np.newaxis, np.newaxis]
-        h = eikonal['h']
-        sigma = 2 * h
-        magn = (
-            1.0
-            / (2.0 * np.pi * sigma)
-            * np.exp(-(((eikonal['rgrid'] - r) / (np.sqrt(2 * sigma) * h)) ** 2 + ((eikonal['zgrid'] - z) / (np.sqrt(2 * sigma) * eikonal['h'])) ** 2))
-        )
-
-        tp = np.sum(eikonal['up'] * magn, axis=(-1, -2))
-        ts = np.sum(eikonal['us'] * magn, axis=(-1, -2))
-        t = np.array([tp[i] if phase_type[i]=='p' else ts[i] for i, _ in enumerate(phase_type)])[:, np.newaxis]
+        fp = interpolate.interp2d(eikonal['rgrid'],eikonal['zgrid'],eikonal['up'].T)
+        fs = interpolate.interp2d(eikonal['rgrid'],eikonal['zgrid'],eikonal['us'].T)
+        t = np.array([fp(r[i], z[i]) if phase_type[i]=='p' else fs(r[i], z[i]) for i, _ in enumerate(phase_type)])
         t = t + center[:,-1:]
 
     else:
@@ -387,7 +378,7 @@ def loss_and_grad(vars, data, station_locs, phase_type, weight, sigma=1, vel={"p
 def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}, eikonal=None): 
 
     if eikonal is not None:
-        loc = invert_location(np.squeeze(data), [np.squeeze(vars)[-1]], np.squeeze(vars)[:-1], station_locs, phase_type, weight, eikonal['up'], eikonal['us'], eikonal['h'], eikonal['rgrid'], eikonal['zgrid'], 2*eikonal['h'], bounds=bounds)
+        loc = invert_location(np.squeeze(data), [np.squeeze(vars)[-1]], np.squeeze(vars)[:-1], station_locs, phase_type, weight, eikonal['up'], eikonal['us'], eikonal['h'], eikonal['rgrid'], eikonal['zgrid'], bounds=bounds)
         return [loc]
 
     else:

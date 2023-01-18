@@ -7,7 +7,6 @@ from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture, calc_amp, calc_time
-from .eikonal import eikonal_solve
 
 to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
@@ -58,18 +57,20 @@ def generate_eikonal_var(config):
     else:
         h = 0.3
     
-    if "eikonal" in config:
-        up = config["eikonal"]["up"]
-        us = config["eikonal"]["us"]
-    
     rlim = [0, ((xlim[1] - xlim[0]) ** 2 + (ylim[1] - ylim[0]) ** 2) ** 0.5]
 
     rx = np.arange(rlim[0], rlim[1] + h, h)
     zx = np.arange(zlim[0], zlim[1] + h, h)
 
-    rgrid, zgrid = np.meshgrid(rx, zx, indexing="ij")
+    rgrid, zgrid = np.meshgrid(rx, zx, indexing="ij", sparse = True)
 
-    eikonal_var = {'rx': rx, 'zx': zx, 'h': h, 'rgrid': rgrid, 'zgrid': zgrid, "up": up, "us": us}
+    eikonal_var = {'rx': rx, 'zx': zx, 'h': h, 'rgrid': rgrid, 'zgrid': zgrid}
+
+    if "eikonal" in config:
+        up = config["eikonal"]["up"]
+        us = config["eikonal"]["us"]
+        eikonal_var["up"] = up
+        eikonal_var["us"] = us
 
     return eikonal_var
 
