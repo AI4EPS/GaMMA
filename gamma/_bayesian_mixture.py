@@ -825,7 +825,7 @@ class BayesianGaussianMixture(BaseMixture):
         (self.weight_concentration_, self.mean_precision_, self.means_,
          self.degrees_of_freedom_, self.covariances_,
          self.precisions_cholesky_) = params
-
+        
         # Weights computation
         if self.weight_concentration_prior_type == "dirichlet_process":
             weight_dirichlet_sum = (self.weight_concentration_[0] +

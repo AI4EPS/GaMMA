@@ -151,7 +151,7 @@ def invert_location(
         loc = loc_
         t0 = t0_
     station_locs = torch.tensor(station_locs, dtype=torch.float32)
-    weight = torch.tensor(weight, dtype=torch.float32)
+    weight = torch.tensor(weight, dtype=torch.float32).squeeze(1)
     data = torch.tensor(data, dtype=torch.float32)
     rgrid = torch.tensor(rgrid, dtype=torch.float32)
     zgrid = torch.tensor(zgrid, dtype=torch.float32)
@@ -162,7 +162,8 @@ def invert_location(
     def closure():
         optimizer.zero_grad()
         tt = t0_[0] + traveltime(loc_, station_locs, phase_type, up, us, h, rgrid, zgrid, bounds=bounds)
-        loss = F.huber_loss(data, tt)
+        loss = F.huber_loss(data, tt, reduction='none') * weight
+        loss = loss.sum() / (weight.sum() + torch.tensor(1e-6))
         loss.backward(retain_graph=True)
         return loss
 

@@ -75,7 +75,6 @@ def generate_eikonal_var(config):
     return eikonal_var
 
 
-
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
@@ -273,6 +272,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         if method == "BGMM":
             gmm = BayesianGaussianMixture(
                 n_components=len(centers_init),
+                # weight_concentration_prior=10,
                 weight_concentration_prior=1 / len(centers_init),
                 mean_precision_prior=mean_precision_prior,
                 covariance_prior=covariance_prior,

@@ -435,16 +435,15 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_l
             if loss_type == "l2":
                 centers[i:i+1, :] = newton_method(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
-                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel, eikonal=eikonal)
-
+                centers[i:i+1, :] = l1_bfgs(centers_prev[i:i+1,:], X, station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel, eikonal=eikonal)   
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
+
         elif n_features == 2:
             if loss_type == "l2":
                 centers[i:i+1, :-1] = newton_method(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], vel=vel)
             elif loss_type == "l1":
                 centers[i:i+1, :-1] = l1_bfgs(centers_prev[i:i+1,:-1], X[:,0:1], station_locs, phase_type, resp[:,i:i+1], bounds=bounds, vel=vel, eikonal=eikonal)
-
             else:
                 raise ValueError(f"loss_type = {loss_type} not in l1 or l2")
             centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs, resp[:,i:i+1])
