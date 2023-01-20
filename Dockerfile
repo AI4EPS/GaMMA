@@ -18,10 +18,10 @@ COPY gamma /app/gamma
 COPY tests /app/tests
 
 # Expose API port
-EXPOSE 8001
+EXPOSE 8000
 
 ENV PYTHONUNBUFFERED=1
 
 # Start API server
 # ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "quakeflow", "uvicorn", "--app-dir=gmma", "app:app", "--reload", "--port", "8001", "--host", "0.0.0.0"]
-ENTRYPOINT ["uvicorn", "--app-dir=gamma", "app:app", "--reload", "--port", "8001", "--host", "0.0.0.0"]
+ENTRYPOINT ["uvicorn", "--app-dir=gamma", "app:app", "--reload", "--port", "8000", "--host", "0.0.0.0"]
