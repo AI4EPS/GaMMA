@@ -519,7 +519,7 @@ class BayesianGaussianMixture(BaseMixture):
         nk, xk, sk, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type,
             self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
-            centers_prev=None, bounds=self.bounds)
+            centers_prev=self.centers_init, bounds=self.bounds)
 
         self._estimate_weights(nk)
         self._estimate_means(nk, xk)

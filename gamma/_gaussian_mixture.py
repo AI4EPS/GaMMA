@@ -363,7 +363,7 @@ def loss_and_grad(vars, data, station_locs, phase_type, weight, sigma=1, vel={"p
     return loss, J_
 
 
-def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=5, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}): 
+def l1_bfgs(vars, data, station_locs, phase_type, weight, max_iter=100, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}): 
 
     opt = optimize.minimize(loss_and_grad, np.squeeze(vars), method="L-BFGS-B", jac=True,
                             args=(data, station_locs, phase_type, weight, 1, vel),

@@ -28,9 +28,10 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   - **max_sigma11**: Max phase time residual (s)
   - **max_sigma22**: Max phase amplitude residual (in *log* scale)
   - **max_sigma12**: Max covariance term. (Usually not used)
-  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations) * (oversampling factor).
+  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
   - **covariance_prior** (default = (5, 5)): covariance prior of time and amplitude residuals. Because current code only uses an uniform velocity model, a large covariance prior can be used to avoid splitting one event into multiple events.
   - **vel** (default = {"p": 6.0, "s": 6.0 / 1.75}): velocity for P and S phases.
+  - **initial_points** (default=[1,1,1] for (x, y, z) directions): Initial earthquake locations (cluster centers). For a large area over 10 degrees, more initial points are helpful, such as [2,2,1].
 
 
 - Synthetic Example
