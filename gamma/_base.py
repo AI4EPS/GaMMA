@@ -296,6 +296,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                 best_n_iter = n_iter
 
         if not self.converged_:
+            print(change)
             warnings.warn('Initialization %d did not converge. '
                           'Try different init parameters, '
                           'or increase max_iter, tol '
