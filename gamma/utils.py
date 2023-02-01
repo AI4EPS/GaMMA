@@ -245,7 +245,6 @@ def _association(k, labels, data, locs, phase_type, phase_weight, pick_idx, pick
             eikonal_var=eikonal_var,
             loss_type="l1",
             bounds=config["bfgs_bounds"],
-            max_iter=150,
             # max_covar=20 ** 2,
             # dummy_comp=True,
             # dummy_prob=0.1,

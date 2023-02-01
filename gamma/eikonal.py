@@ -157,7 +157,7 @@ def invert_location(
     zgrid = torch.tensor(zgrid, dtype=torch.float32)
     up = torch.tensor(up, dtype=torch.float32)
     us = torch.tensor(us, dtype=torch.float32)
-    optimizer = optim.LBFGS(params=[t0_, loc_], max_iter=1000, line_search_fn="strong_wolfe")
+    optimizer = optim.LBFGS(params=[t0_, loc_], max_iter=100, line_search_fn="strong_wolfe")
 
     def closure():
         optimizer.zero_grad()
