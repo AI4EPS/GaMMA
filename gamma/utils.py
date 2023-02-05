@@ -249,6 +249,9 @@ def init_centers(config, data_, locs_, time_range):
             initial_points = [initial_points, initial_points, initial_points]
     else:
         initial_points = [1,1,1]
+    
+    if ((np.prod(initial_points) + 1) * config["oversample_factor"]) > len(data_):
+        initial_points = [1,1,1]
 
     x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0]+2)[1:-1]
     y_init = np.linspace(config["y(km)"][0], config["y(km)"][1], initial_points[1]+2)[1:-1]
@@ -266,7 +269,7 @@ def init_centers(config, data_, locs_, time_range):
 
     num_sta = len(np.unique(locs_, axis=0))
     num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
-    num_t_init = min(int(num_t_init), len(data_))
+    num_t_init = min(int(num_t_init), len(data_)//num_xyz_init)
     t_init = np.sort(data_[:, 0])[::(len(data_[:, 0]) // num_t_init)][:num_t_init]
     # t_init = np.linspace(
     #         data_[:, 0].min() - 0.1 * time_range,
@@ -292,6 +295,9 @@ def init_centers(config, data_, locs_, time_range):
             ).T
     else:
         raise (ValueError("Unsupported dims"))
+    
+    if config["use_amplitude"]:
+        centers_init = np.hstack([centers_init, 2.0*np.ones((len(centers_init), 1))]) # init magnitude to 2.0
 
     # import matplotlib.pyplot as plt
     # plt.figure()

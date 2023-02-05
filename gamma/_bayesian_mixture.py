@@ -496,7 +496,7 @@ class BayesianGaussianMixture(BaseMixture):
             if n_features == 1: #(time,)
                 means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
             elif n_features == 2: #(time, amp)
-                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
+                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :-1], self.station_locs, self.phase_type, vel=self.vel)
                 means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
             else:
                 raise ValueError(f"n_features = {n_features} > 2!")

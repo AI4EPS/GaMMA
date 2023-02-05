@@ -412,7 +412,7 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_l
 
     if centers_prev is None:
         centers_prev = np.dot(resp.T, np.hstack([station_locs, X])) / nk[:, np.newaxis]
-    centers = np.zeros_like(centers_prev) #x, y, t, amp, ...
+    centers = np.zeros_like(centers_prev) #x, y, z, t, amp, ...
     
     for i in range(len(centers_prev)):
         if n_features == 1:
@@ -882,7 +882,7 @@ class GaussianMixture(BaseMixture):
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
             self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
-            centers_prev=None, bounds=self.bounds)
+            centers_prev=self.centers_init, bounds=self.bounds)
         weights /= n_samples
 
         # self.weights_ = (weights if self.weights_init is None else self.weights_init)
