@@ -6,7 +6,8 @@ from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
-from ._gaussian_mixture import GaussianMixture, calc_amp, calc_time
+from ._gaussian_mixture import GaussianMixture
+from .seismic_ops import calc_amp, calc_time
 
 to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
@@ -58,7 +59,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     if "covariance_prior" in config:
         covariance_prior_pre = config["covariance_prior"]
     else:
-        covariance_prior_pre = [5.0, 5.0]
+        covariance_prior_pre = [5.0, 2.0]
 
     if ("use_dbscan" in config) and config["use_dbscan"]:
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
@@ -297,7 +298,7 @@ def init_centers(config, data_, locs_, time_range):
         raise (ValueError("Unsupported dims"))
     
     if config["use_amplitude"]:
-        centers_init = np.hstack([centers_init, 2.0*np.ones((len(centers_init), 1))]) # init magnitude to 2.0
+        centers_init = np.hstack([centers_init, 1.0*np.ones((len(centers_init), 1))]) # init magnitude to 1.0
 
     # import matplotlib.pyplot as plt
     # plt.figure()

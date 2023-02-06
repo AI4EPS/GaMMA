@@ -15,7 +15,7 @@ from ._gaussian_mixture import _compute_log_det_cholesky
 from ._gaussian_mixture import _compute_precision_cholesky
 from ._gaussian_mixture import _estimate_gaussian_parameters
 from ._gaussian_mixture import _estimate_log_gaussian_prob
-from ._gaussian_mixture import calc_time, calc_mag
+from .seismic_ops import *
 from sklearn.utils import check_array
 from sklearn.utils.validation import _deprecate_positional_args
 
@@ -487,25 +487,42 @@ class BayesianGaussianMixture(BaseMixture):
                              % self.covariance_prior)
 
 
-    def _initialize_centers(self, X, random_state):
+    # def _initialize_centers(self, X, random_state):
 
-        n_samples, n_features = X.shape
+    #     n_samples, n_features = X.shape
 
-        means = np.zeros([self.n_components, n_samples, n_features])
-        for i in range(len(self.centers_init)):
-            if n_features == 1: #(time,)
-                means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
-            elif n_features == 2: #(time, amp)
-                means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :-1], self.station_locs, self.phase_type, vel=self.vel)
-                means[i, :, 1:2] = X[:,1:2] #calc_amp(3.0, self.centers_init[i:i+1, :], self.station_locs)
-            else:
-                raise ValueError(f"n_features = {n_features} > 2!")
+    #     means = np.zeros([self.n_components, n_samples, n_features])
+    #     for i in range(len(self.centers_init)):
+    #         if n_features == 1: #(time,)
+    #             means[i, :, :] = calc_time(self.centers_init[i:i+1, :], self.station_locs, self.phase_type, vel=self.vel)
+    #         elif n_features == 2: #(time, amp)
+    #             means[i, :, 0:1] = calc_time(self.centers_init[i:i+1, :-1], self.station_locs, self.phase_type, vel=self.vel)
+    #             means[i, :, 1:2] = X[:,1:2]
+    #             self.centers_init[i, -1:] = calc_mag(X[:,1:2], self.centers_init[i:i+1,:-1], self.station_locs, np.ones((len(X),1)))
+    #             # means[i, :, 1:2] = calc_amp(self.centers_init[i, -1:], self.centers_init[i:i+1, :-1], self.station_locs)
+    #         else:
+    #             raise ValueError(f"n_features = {n_features} > 2!")
 
-        dist = np.linalg.norm(means - X, axis=-1) # (n_components, n_samples, n_features) -> (n_components, n_samples)
-        resp = np.exp(-dist/np.median(dist, axis=0, keepdims=True)).T 
-        resp /= np.sum(resp, axis=1, keepdims=True) # (n_components, n_samples)
+    #     ## performance is not good
+    #     # resp = np.zeros((n_samples, self.n_components))
+    #     # dist = np.sum(np.abs(means - X), axis=-1).T # (n_components, n_samples, n_features) -> (n_samples, n_components)
+    #     # resp[np.arange(n_samples), np.argmax(dist, axis=1)] = 1.0
 
-        return resp
+    #     ## performance is ok
+    #     # sigma = np.array([1.0,1.0])
+    #     # sigma = np.sqrt(np.diag(self.covariance_prior))
+    #     # prob = np.sum(1.0/sigma * np.exp( - (means - X) ** 2 / (2 * sigma**2)), axis=-1).T # (n_components, n_samples, n_features) -> (n_samples, n_components)
+    #     # prob_sum = np.sum(prob, axis=1, keepdims=True)
+    #     # prob_sum[prob_sum == 0] = 1.0
+    #     # resp = prob / prob_sum
+
+    #     dist = np.linalg.norm(means - X, axis=-1).T # (n_components, n_samples, n_features) -> (n_samples, n_components)
+    #     resp = np.exp(-dist)
+    #     resp_sum = resp.sum(axis=1, keepdims=True)
+    #     resp_sum[resp_sum == 0] = 1.0
+    #     resp = resp / resp_sum
+
+    #     return resp
 
     def _initialize(self, X, resp):
         """Initialization of the mixture parameters.

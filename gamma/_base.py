@@ -17,7 +17,7 @@ from sklearn.base import DensityMixin
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils import check_array, check_random_state
 from sklearn.utils.validation import check_is_fitted
-
+from .seismic_ops import initialize_centers
 
 def _check_shape(param, param_shape, name):
     """Validate the shape of the input parameter 'param'.
@@ -159,7 +159,9 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             resp = random_state.rand(n_samples, self.n_components)
             resp /= resp.sum(axis=1)[:, np.newaxis]
         elif self.init_params == 'centers':
-            resp = self._initialize_centers(X, random_state)
+            # resp = self._initialize_centers(X, random_state)
+            resp, centers, means = initialize_centers(X, self.phase_type, self.centers_init, self.station_locs, random_state)
+            self.centers_init = centers
         else:
             raise ValueError("Unimplemented initialization method '%s'"
                              % self.init_params)
