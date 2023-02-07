@@ -9,6 +9,7 @@ import pandas as pd
 from fastapi import FastAPI
 from kafka import KafkaProducer
 from pydantic import BaseModel
+from pyproj import Proj
 
 from gamma import BayesianGaussianMixture, GaussianMixture
 from gamma.utils import convert_picks_csv, association, from_seconds
@@ -110,48 +111,30 @@ class Pick(BaseModel):
     picks: List[Dict[str, Union[float, str]]]
 
 
-def run_gamma(data, config, stations):
-    picks = pd.DataFrame(data.picks)
-    picks["timestamp"] = picks["timestamp"].apply(lambda x: datetime.strptime(x, "%Y-%m-%dT%H:%M:%S.%f"))
+def run_gamma(picks, config, stations):
 
-    event_idx0 = 0  ## current earthquake index
-    assignments = []
-    if (len(picks) > 0) and (len(picks) < 5000):
-        catalogs, assignments = association(picks, stations, config, event_idx0, config["method"])
-        event_idx0 += len(catalogs)
-    else:
-        catalogs = []
-        for hour in sorted(list(set(picks["time_idx"]))):
-            picks_ = picks[picks["time_idx"] == hour]
-            if len(picks_) == 0:
-                continue
-            catalog, assign = association(picks_, stations, config, event_idx0, config["method"])
-            event_idx0 += len(catalog)
-            catalogs.extend(catalog)
-            assignments.extend(assign)
+    proj = Proj(f"+proj=sterea +lon_0={config['center'][0]} +lat_0={config['center'][1]} +units=km")
 
-    ## create catalog
-    print(catalogs)
-    catalogs = pd.DataFrame(catalogs, columns=["time(s)"] + config["dims"] + ["magnitude", "sigma_time", "sigma_amp", "cov_time_amp",  "event_idx", "prob_gamma"])
-    catalogs["time"] = catalogs["time(s)"].apply(lambda x: from_seconds(x))
-    catalogs["longitude"] = catalogs["x(km)"].apply(lambda x: x / config["degree2km"] + config["center"][0])
-    catalogs["latitude"] = catalogs["y(km)"].apply(lambda x: x / config["degree2km"] + config["center"][1])
-    catalogs["depth(m)"] = catalogs["z(km)"].apply(lambda x: x * 1e3)
-    catalogs = catalogs[['time', 'magnitude', 'longitude', 'latitude', 'depth(m)', 'sigma_time', 'sigma_amp', 'prob_gamma', "event_idx"]]
+    stations[["x(km)", "y(km)"]] = stations.apply(lambda x: pd.Series(proj(longitude=x.longitude, latitude=x.latitude)), axis=1)
+    stations["z(km)"] = stations["elevation(m)"].apply(lambda x: -x/1e3)
 
-    ## add assignment to picks
-    assignments = pd.DataFrame(assignments, columns=["pick_idx", "event_idx", "prob_gamma"])
-    picks_gamma = picks.join(assignments.set_index("pick_idx")).fillna(-1).astype({'event_idx': int})
-    picks_gamma["timestamp"] = picks_gamma["timestamp"].apply(lambda x: x.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3])
-    if "time_idx" in picks_gamma:
-        picks_gamma.drop(columns=["time_idx"], inplace=True)
-    return catalogs,picks_gamma
+    catalogs, assignments = association(picks, stations, config, 0, config["method"])
+
+    catalogs = pd.DataFrame(catalogs, columns=["time"]+config["dims"]+["magnitude", "sigma_time", "sigma_amp", "cov_time_amp",  "event_index", "gamma_score"])
+    catalogs[["longitude","latitude"]] = catalogs.apply(lambda x: pd.Series(proj(longitude=x["x(km)"], latitude=x["y(km)"], inverse=True)), axis=1)
+    catalogs["depth(m)"] = catalogs["z(km)"].apply(lambda x: x*1e3)
+
+    assignments = pd.DataFrame(assignments, columns=["pick_index", "event_index", "gamma_score"])
+    picks_gamma = picks.join(assignments.set_index("pick_index")).fillna(-1).astype({'event_index': int})
+
+    return catalogs, picks_gamma
 
 
 @app.post('/predict_stream')
 def predict(data: Pick):
 
-    if len(data.picks) == 0:
+    picks =  pd.DataFrame(data.picks)
+    if len(picks) == 0:
         return {"catalog": [], "picks": []}
 
     catalogs, picks_gamma = run_gamma(data, config, stations)
@@ -167,7 +150,8 @@ def predict(data: Pick):
 @app.post('/predict')
 def predict(data: Data):
 
-    if len(data.picks) == 0:
+    picks =  pd.DataFrame(data.picks)
+    if len(picks) == 0:
         return {"catalog": [], "picks": []}
 
     stations = pd.DataFrame(data.stations)
@@ -188,7 +172,7 @@ def predict(data: Data):
     if "center" not in config:
         config["center"] = [np.mean(config["xlim_degree"]), np.mean(config["ylim_degree"])]
     if "x(km)" not in config:
-        config["x(km)"] = (np.array(config["xlim_degree"]) - config["center"][0]) * config["degree2km"]
+        config["x(km)"] = (np.array(config["xlim_degree"]) - config["center"][0]) * config["degree2km"] * np.cos(np.deg2rad(config["center"][1]))
     if "y(km)" not in config:
         config["y(km)"] = (np.array(config["ylim_degree"]) - config["center"][1]) * config["degree2km"]
     if "z(km)" not in config:
@@ -196,11 +180,7 @@ def predict(data: Data):
     if "bfgs_bounds" not in config:
         config["bfgs_bounds"] = [list(config[x]) for x in config["dims"]] + [[None, None]]
 
-    stations["x(km)"] = stations["longitude"].apply(lambda x: (x - config["center"][0]) * config["degree2km"])
-    stations["y(km)"] = stations["latitude"].apply(lambda x: (x - config["center"][1]) * config["degree2km"])
-    stations["z(km)"] = stations["elevation(m)"].apply(lambda x: -x / 1e3)
-
-    catalogs, picks_gamma = run_gamma(data, config, stations)
+    catalogs, picks_gamma = run_gamma(picks, config, stations)
 
     if use_kafka:
         print("Push events to kafka...")
