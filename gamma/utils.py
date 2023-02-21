@@ -81,7 +81,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
         if k == -1:
             data_ = data[labels == k]
-            pbar.set_description(f"Skip {len(data_)} picks")
+            pbar.set_description(f"Skip {len(data_)} picks by DBSCAN")
             pbar.update(len(data_))
             continue
 
@@ -227,10 +227,13 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 ),
                 # "time(s)": gmm.centers_[i, len(config["dims"])],
                 "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
-                "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
-                "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
+                "sigma_time": gmm.covariances_[i, 0, 0],
+                "sigma_amp": gmm.covariances_[i, 1, 1] if config["use_amplitude"] else 0,
                 "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
                 "gamma_score": prob_eq[i],
+                "number_picks": len(tmp_data[idx_filter]),
+                "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
+                "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
                 "event_index": event_idx,
             }
             for j, k in enumerate(config["dims"]):  ## add location
@@ -270,8 +273,8 @@ def init_centers(config, data_, locs_, time_range):
 
     num_sta = len(np.unique(locs_, axis=0))
     num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
-    num_t_init = min(int(num_t_init), len(data_)//num_xyz_init)
-    t_init = np.sort(data_[:, 0])[::(len(data_[:, 0]) // num_t_init)][:num_t_init]
+    num_t_init = min(int(num_t_init), max(len(data_)//num_xyz_init, 1))
+    t_init = np.sort(data_[:, 0])[::max(len(data_)//num_t_init, 1)][:num_t_init]
     # t_init = np.linspace(
     #         data_[:, 0].min() - 0.1 * time_range,
     #         data_[:, 0].max() + 0.1 * time_range,
