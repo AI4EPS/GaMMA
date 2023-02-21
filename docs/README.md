@@ -19,20 +19,22 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
 
 - Hyperparameters:
   - **use_amplitude** (default = True): If using amplitude information.
+  - **vel** (default = {"p": 6.0, "s": 6.0 / 1.75}): velocity for P and S phases.
   - **use_dbscan**: If using dbscan to cut a long sequence of picks into segments. Using DBSCAN can significantly speed up associaiton using small windows. 
   - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as a neighbor of the other. See details in [DBSCAN](https://https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
   - **dbscan_min_samples** (default = 3): The number of samples in a neighborhood for a point to be considered as a core point. See details in [DBSCAN](https://https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
-  - **min_picks_per_eq**: Minimum picks for associated earthquakes. We can also specify minimum P or S picks:
+  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
+  - **initial_points** (default=[1,1,1] for (x, y, z) directions): Initial earthquake locations (cluster centers). For a large area over 10 degrees, more initial points are helpful, such as [2,2,1].
+  - **covariance_prior** (default = (5, 5)): covariance prior of time and amplitude residuals. Because current code only uses an uniform velocity model, a large covariance prior can be used to avoid splitting one event into multiple events.
+  - Filtering low quality association
+    - **min_picks_per_eq**: Minimum picks for associated earthquakes. We can also specify minimum P or S picks:
   	- **min_p_picks_per_eq**: Minimum P-picks for associated earthquakes.
   	- **min_s_picks_per_eq**: Minimum S-picks for associated earthquakes.
-  - **max_sigma11**: Max phase time residual (s)
-  - **max_sigma22**: Max phase amplitude residual (in *log* scale)
-  - **max_sigma12**: Max covariance term. (Usually not used)
-  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
-  - **covariance_prior** (default = (5, 5)): covariance prior of time and amplitude residuals. Because current code only uses an uniform velocity model, a large covariance prior can be used to avoid splitting one event into multiple events.
-  - **vel** (default = {"p": 6.0, "s": 6.0 / 1.75}): velocity for P and S phases.
-  - **initial_points** (default=[1,1,1] for (x, y, z) directions): Initial earthquake locations (cluster centers). For a large area over 10 degrees, more initial points are helpful, such as [2,2,1].
+    - **max_sigma11**: Max phase time residual (s)
+    - **max_sigma22**: Max phase amplitude residual (in *log* scale)
+    - **max_sigma12**: Max covariance term. (Usually not used)
 
+Note the association speed is controlled by **dbscan_eps** and **oversampling_factor**. Larger values are preferred, but at the expense of a slower association speed.
 
 - Synthetic Example
 
