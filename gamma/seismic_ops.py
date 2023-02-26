@@ -20,8 +20,8 @@ import scipy.optimize
 # |\nabla u| = f
 # ((u - a1)^+)^2 + ((u - a2)^+)^2 + ((u - a3)^+)^2 = f^2 h^2
 
-def calculate_unique_solution(a, b, f, h):
 
+def calculate_unique_solution(a, b, f, h):
     d = abs(a - b)
     if d >= f * h:
         return min(a, b) + f * h
@@ -30,11 +30,10 @@ def calculate_unique_solution(a, b, f, h):
 
 
 def sweeping_over_I_J_K(u, I, J, f, h):
-
     m = len(I)
     n = len(J)
 
-    for (i, j) in itertools.product(I, J):
+    for i, j in itertools.product(I, J):
         if i == 0:
             uxmin = u[i + 1, j]
         elif i == m - 1:
@@ -57,7 +56,6 @@ def sweeping_over_I_J_K(u, I, J, f, h):
 
 
 def sweeping(u, v, h):
-
     f = 1.0 / v  ## slowness
 
     m, n = u.shape
@@ -75,7 +73,6 @@ def sweeping(u, v, h):
 
 
 def eikonal_solve(u, f, h):
-
     print("Eikonal Solver: ")
     for i in range(50):
         u_old = np.copy(u)
@@ -88,33 +85,43 @@ def eikonal_solve(u, f, h):
 
     return u
 
+
 ###################################### Traveltime based on Eikonal Timetable ######################################
 
-def _interp(time_table, r, z, rgrid, zgrid, h):
 
-    ir0 = (r - rgrid[0,0]).floor_divide(h).clamp(0, rgrid.shape[0] - 2).long()
-    iz0 = (z - zgrid[0,0]).floor_divide(h).clamp(0, zgrid.shape[1] - 2).long()
+def _interp(time_table, r, z, rgrid, zgrid, h):
+    ir0 = (r - rgrid[0, 0]).floor_divide(h).clamp(0, rgrid.shape[0] - 2).long()
+    iz0 = (z - zgrid[0, 0]).floor_divide(h).clamp(0, zgrid.shape[1] - 2).long()
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
     ## https://en.wikipedia.org/wiki/Bilinear_interpolation
-    x1 = ir0 * h + rgrid[0,0]
-    x2 = ir1 * h + rgrid[0,0]
-    y1 = iz0 * h + zgrid[0,0]
-    y2 = iz1 * h + zgrid[0,0]
+    x1 = ir0 * h + rgrid[0, 0]
+    x2 = ir1 * h + rgrid[0, 0]
+    y1 = iz0 * h + zgrid[0, 0]
+    y2 = iz1 * h + zgrid[0, 0]
 
     Q11 = time_table[ir0, iz0]
     Q12 = time_table[ir0, iz1]
     Q21 = time_table[ir1, iz0]
     Q22 = time_table[ir1, iz1]
 
-    t = 1/(x2-x1)/(y2-y1) * (Q11*(x2-r)*(y2-z) + Q21*(r-x1)*(y2-z) + Q12*(x2-r)*(z-y1) + Q22*(r-x1)*(z-y1))
+    t = (
+        1
+        / (x2 - x1)
+        / (y2 - y1)
+        * (
+            Q11 * (x2 - r) * (y2 - z)
+            + Q21 * (r - x1) * (y2 - z)
+            + Q12 * (x2 - r) * (z - y1)
+            + Q22 * (r - x1) * (z - y1)
+        )
+    )
 
     return t
 
 
 def traveltime(event_loc, station_loc, time_table, rgrid, zgrid, h, **kwargs):
-
     r = torch.sqrt(torch.sum((event_loc[:, :2] - station_loc[:, :2]) ** 2, dim=-1, keepdims=True))
     z = event_loc[:, 2:] - station_loc[:, 2:]
     if (event_loc[:, 2:] < 0).any():
@@ -124,15 +131,14 @@ def traveltime(event_loc, station_loc, time_table, rgrid, zgrid, h, **kwargs):
 
     return tt
 
+
 ##################################################################################################################
 
-def calc_time(event_loc, station_loc, phase_type, vel={"p":6.0, "s":6.0/1.75}, eikonal=None, **kwargs):
-    """
-    center: (loc, t)
-    """
 
-    ev_loc = event_loc[:,:-1]
-    ev_t = event_loc[:,-1:]
+def calc_time(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75}, eikonal=None, **kwargs):
+
+    ev_loc = event_loc[:, :-1]
+    ev_t = event_loc[:, -1:]
 
     if eikonal is None:
         v = np.array([vel[x] for x in phase_type])[:, np.newaxis]
@@ -141,8 +147,24 @@ def calc_time(event_loc, station_loc, phase_type, vel={"p":6.0, "s":6.0/1.75}, e
         ev_loc = torch.from_numpy(ev_loc).float()
         station_locs = torch.from_numpy(station_loc).float()
 
-        tp = traveltime(ev_loc, station_locs[phase_type=="p"], eikonal["up"], eikonal["rgrid"], eikonal["zgrid"], eikonal["h"], **kwargs)
-        ts = traveltime(ev_loc, station_locs[phase_type=="s"], eikonal["us"], eikonal["rgrid"], eikonal["zgrid"], eikonal["h"], **kwargs)
+        tp = traveltime(
+            ev_loc,
+            station_locs[phase_type == "p"],
+            eikonal["up"],
+            eikonal["rgrid"],
+            eikonal["zgrid"],
+            eikonal["h"],
+            **kwargs,
+        )
+        ts = traveltime(
+            ev_loc,
+            station_locs[phase_type == "s"],
+            eikonal["us"],
+            eikonal["rgrid"],
+            eikonal["zgrid"],
+            eikonal["h"],
+            **kwargs,
+        )
 
         tt = np.zeros(len(phase_type), dtype=np.float32)[:, np.newaxis]
         tt[phase_type == "p"] = tp.numpy()
@@ -151,53 +173,50 @@ def calc_time(event_loc, station_loc, phase_type, vel={"p":6.0, "s":6.0/1.75}, e
 
     return tt
 
+
 def calc_mag(data, event_loc, station_loc, weight, min=-2, max=8):
-    """
-    center: (loc, t)
-    data: (n_sample, amp)
-    """
-    dist = np.linalg.norm(event_loc[:,:-1] - station_loc, axis=-1, keepdims=True)
+
+    dist = np.linalg.norm(event_loc[:, :-1] - station_loc, axis=-1, keepdims=True)
     # mag_ = ( data - 2.48 + 2.76 * np.log10(dist) )
     ## Picozzi et al. (2018) A rapid response magnitude scale...
     c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
-    mag_ = (data - c0 - c3*np.log10(np.maximum(dist, 0.1)))/c1 + 3.5
+    mag_ = (data - c0 - c3 * np.log10(np.maximum(dist, 0.1))) / c1 + 3.5
     ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # mag_ = (data - c0 - c3*np.log10(dist))/c1
-    #mag = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
-    mu = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
-    std = np.sqrt(np.sum((mag_-mu)**2 * weight) / (np.sum(weight)+1e-12))
-    mask = (np.abs(mag_ - mu) <= 2*std)
-    mag = np.sum(mag_[mask] * weight[mask]) / (np.sum(weight[mask])+1e-6)
+    # mag = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
+    mu = np.sum(mag_ * weight) / (np.sum(weight) + 1e-6)
+    std = np.sqrt(np.sum((mag_ - mu) ** 2 * weight) / (np.sum(weight) + 1e-12))
+    mask = np.abs(mag_ - mu) <= 2 * std
+    mag = np.sum(mag_[mask] * weight[mask]) / (np.sum(weight[mask]) + 1e-6)
     mag = np.clip(mag, min, max)
     return mag
 
+
 def calc_amp(mag, event_loc, station_loc):
-    """
-    center: (loc, t)
-    """
-    dist = np.linalg.norm(event_loc[:,:-1] - station_loc, axis=-1, keepdims=True)
+
+    dist = np.linalg.norm(event_loc[:, :-1] - station_loc, axis=-1, keepdims=True)
     # logA = mag + 2.48 - 2.76 * np.log10(dist)
     ## Picozzi et al. (2018) A rapid response magnitude scale...
     c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
-    logA = c0 + c1*(mag-3.5) + c3*np.log10(np.maximum(dist, 0.1))
+    logA = c0 + c1 * (mag - 3.5) + c3 * np.log10(np.maximum(dist, 0.1))
     ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # logA = c0 + c1*mag + c3*np.log10(dist)
     return logA
 
-## Huber loss
-def loss_and_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"p":6.0, "s":6.0/1.75}, sigma=1):
 
+## Huber loss
+def loss_and_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"p": 6.0, "s": 6.0 / 1.75}, sigma=1):
     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
     event_loc = event_loc[np.newaxis, :]
-    dist = np.sqrt(np.sum((station_loc - event_loc[:,:-1])**2, axis=1, keepdims=True))
+    dist = np.sqrt(np.sum((station_loc - event_loc[:, :-1]) ** 2, axis=1, keepdims=True))
     J = np.zeros([phase_time.shape[0], event_loc.shape[1]])
-    J[:, :-1] = (event_loc[:,:-1] - station_loc)/(dist + 1e-6)/v
+    J[:, :-1] = (event_loc[:, :-1] - station_loc) / (dist + 1e-6) / v
     J[:, -1] = 1
-    
-    y = dist/v - (phase_time - event_loc[:,-1:])
-    
+
+    y = dist / v - (phase_time - event_loc[:, -1:])
+
     # std = np.sqrt(np.sum(y**2 * weight) / (np.sum(weight)+1e-12))
     # mask = (np.abs(y) <= 2*std)
     # l1 = np.squeeze((np.abs(y) > sigma) & mask)
@@ -206,27 +225,56 @@ def loss_and_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"
     l1 = np.squeeze((np.abs(y) > sigma))
     l2 = np.squeeze((np.abs(y) <= sigma))
 
-    loss = np.sum( (sigma*np.abs(y[l1]) - 0.5*sigma**2) * weight[l1] ) \
-           + np.sum( 0.5*y[l2]**2 * weight[l2] )
-    J_ = np.sum( sigma*np.sign(y[l1]) * J[l1] * weight[l1], axis=0, keepdims=True ) \
-        + np.sum( y[l2] * J[l2] * weight[l2], axis=0, keepdims=True )  
+    loss = np.sum((sigma * np.abs(y[l1]) - 0.5 * sigma**2) * weight[l1]) + np.sum(0.5 * y[l2] ** 2 * weight[l2])
+    J_ = np.sum(sigma * np.sign(y[l1]) * J[l1] * weight[l1], axis=0, keepdims=True) + np.sum(
+        y[l2] * J[l2] * weight[l2], axis=0, keepdims=True
+    )
 
     return loss, J_
 
 
-def linloc(event_loc0, phase_time, phase_type, station_loc, weight, max_iter=10, convergence=1e-3, bounds=None, vel={"p":6.0, "s":6.0/1.75}): 
-
-    opt = scipy.optimize.minimize(loss_and_grad, np.squeeze(event_loc0), method="L-BFGS-B", jac=True,
-                            args=(phase_time, phase_type, station_loc, weight, vel, 1),
-                            bounds=bounds,
-                            options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
-                            )
+def linloc(
+    event_loc0,
+    phase_time,
+    phase_type,
+    station_loc,
+    weight,
+    max_iter=10,
+    convergence=1e-3,
+    bounds=None,
+    vel={"p": 6.0, "s": 6.0 / 1.75},
+):
+    opt = scipy.optimize.minimize(
+        loss_and_grad,
+        np.squeeze(event_loc0),
+        method="L-BFGS-B",
+        jac=True,
+        args=(phase_time, phase_type, station_loc, weight, vel, 1),
+        bounds=bounds,
+        options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
+    )
 
     return opt.x[np.newaxis, :], opt.fun
 
 
-def eikoloc(event_loc0, phase_time, phase_type, station_loc, weight, up, us, rgrid, zgrid, h, bounds=None, device="cpu", add_eqt=False, gamma=0.1, max_iter=1000, convergence=1e-3):
-
+def eikoloc(
+    event_loc0,
+    phase_time,
+    phase_type,
+    station_loc,
+    weight,
+    up,
+    us,
+    rgrid,
+    zgrid,
+    h,
+    bounds=None,
+    device="cpu",
+    add_eqt=False,
+    gamma=0.1,
+    max_iter=1000,
+    convergence=1e-3,
+):
     event_loc = torch.tensor(event_loc0, dtype=torch.float32, requires_grad=True, device=device)
     if bounds is not None:
         bounds = torch.tensor(bounds, dtype=torch.float32, device=device)
@@ -248,19 +296,21 @@ def eikoloc(event_loc0, phase_time, phase_type, station_loc, weight, up, us, rgr
     def closure():
         optimizer.zero_grad()
         if bounds is not None:
-            loc0_ = torch.max(torch.min(event_loc[:,:-1], bounds[:, 1]), bounds[:, 0])
+            loc0_ = torch.max(torch.min(event_loc[:, :-1], bounds[:, 1]), bounds[:, 0])
         else:
-            loc0_ = event_loc[:,:-1]
+            loc0_ = event_loc[:, :-1]
         loc0_ = torch.nan_to_num(loc0_, nan=0)
         t0_ = event_loc[:, -1:]
         if len(p_index) > 0:
             tt_p = traveltime(loc0_, loc_p, up, rgrid, zgrid, h, sigma=1)
-            pred_p = t0_ + tt_p 
+            pred_p = t0_ + tt_p
             loss_p = torch.mean(F.huber_loss(obs_p, pred_p, reduction="none") * weight_p)
             if add_eqt:
-                dd_tt_p = (tt_p.unsqueeze(-1) - tt_p.unsqueeze(-2)) 
-                dd_time_p = (obs_p.unsqueeze(-1) - obs_p.unsqueeze(-2))
-                loss_p += gamma * torch.mean(F.huber_loss(dd_tt_p, dd_time_p, reduction="none") * weight_p.unsqueeze(-1) * weight_p.unsqueeze(-2))
+                dd_tt_p = tt_p.unsqueeze(-1) - tt_p.unsqueeze(-2)
+                dd_time_p = obs_p.unsqueeze(-1) - obs_p.unsqueeze(-2)
+                loss_p += gamma * torch.mean(
+                    F.huber_loss(dd_tt_p, dd_time_p, reduction="none") * weight_p.unsqueeze(-1) * weight_p.unsqueeze(-2)
+                )
             # loss_p = F.mse_loss(time_p, tt_p)
         else:
             loss_p = 0
@@ -269,9 +319,11 @@ def eikoloc(event_loc0, phase_time, phase_type, station_loc, weight, up, us, rgr
             pred_s = t0_ + tt_s
             loss_s = torch.mean(F.huber_loss(obs_s, pred_s, reduction="none") * weight_s)
             if add_eqt:
-                dd_tt_s = (tt_s.unsqueeze(-1) - tt_s.unsqueeze(-2)) 
-                dd_time_s = (obs_s.unsqueeze(-1) - obs_s.unsqueeze(-2))
-                loss_s += gamma * torch.mean(F.huber_loss(dd_tt_s, dd_time_s, reduction="none") * weight_s.unsqueeze(-1) * weight_s.unsqueeze(-2))
+                dd_tt_s = tt_s.unsqueeze(-1) - tt_s.unsqueeze(-2)
+                dd_time_s = obs_s.unsqueeze(-1) - obs_s.unsqueeze(-2)
+                loss_s += gamma * torch.mean(
+                    F.huber_loss(dd_tt_s, dd_time_s, reduction="none") * weight_s.unsqueeze(-1) * weight_s.unsqueeze(-2)
+                )
             # loss_s = F.mse_loss(time_s, tt_s)
         else:
             loss_s = 0
@@ -284,30 +336,63 @@ def eikoloc(event_loc0, phase_time, phase_type, station_loc, weight, up, us, rgr
 
     event_loc = event_loc.detach().cpu()
     if bounds is not None:
-        event_loc[:,:-1] = torch.max(torch.min(event_loc[:,:-1], bounds[:, 1]), bounds[:, 0])
-    
-    return  event_loc, loss
+        event_loc[:, :-1] = torch.max(torch.min(event_loc[:, :-1], bounds[:, 1]), bounds[:, 0])
+
+    return event_loc, loss
 
 
-def calc_loc(phase_time, phase_type, station_loc, weight, event_loc0, eikonal=None, vel={"p":6.0, "s":6.0/1.75}, bounds=None, max_iter=10, convergence=1e-3):
-
+def calc_loc(
+    phase_time,
+    phase_type,
+    station_loc,
+    weight,
+    event_loc0,
+    eikonal=None,
+    vel={"p": 6.0, "s": 6.0 / 1.75},
+    bounds=None,
+    max_iter=10,
+    convergence=1e-3,
+):
     if eikonal is None:
-        event_loc, loss = linloc(event_loc0, phase_time, phase_type, station_loc, weight, vel=vel, bounds=bounds, max_iter=max_iter, convergence=convergence)
+        event_loc, loss = linloc(
+            event_loc0,
+            phase_time,
+            phase_type,
+            station_loc,
+            weight,
+            vel=vel,
+            bounds=bounds,
+            max_iter=max_iter,
+            convergence=convergence,
+        )
     else:
-        event_loc, loss = eikoloc(event_loc0, phase_time, phase_type, station_loc, weight, up=eikonal["up"], us=eikonal["us"], rgrid=eikonal["rgrid"], zgrid=eikonal["zgrid"], h=eikonal["h"], bounds=bounds[:-1], max_iter=max_iter, convergence=convergence)
-    
+        event_loc, loss = eikoloc(
+            event_loc0,
+            phase_time,
+            phase_type,
+            station_loc,
+            weight,
+            up=eikonal["up"],
+            us=eikonal["us"],
+            rgrid=eikonal["rgrid"],
+            zgrid=eikonal["zgrid"],
+            h=eikonal["h"],
+            bounds=bounds[:-1],
+            max_iter=max_iter,
+            convergence=convergence,
+        )
+
     return event_loc, loss
 
 
 def initialize_eikonal(config):
-
-    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0])**2 + (config["ylim"][1] - config["ylim"][0])**2)]
+    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
     zlim = config["zlim"]
     h = config["h"]
     edge_grids = 3
 
-    rgrid = np.arange(rlim[0]-edge_grids*h, rlim[1], h)
-    zgrid = np.arange(zlim[0]-edge_grids*h, zlim[1], h)
+    rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
+    zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
     m, n = len(rgrid), len(zgrid)
 
     vel = config["vel"]
@@ -332,23 +417,22 @@ def initialize_eikonal(config):
     rgrid, zgrid = torch.meshgrid(rgrid, zgrid, indexing="ij")
 
     config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
-    
+
     return config
 
 
 def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
-
     n_samples, n_features = X.shape
     n_components, _ = centers_init.shape
     centers = centers_init.copy()
 
     means = np.zeros([n_components, n_samples, n_features])
     for i in range(n_components):
-        if n_features == 1: #(time,)
-            means[i, :, :] = calc_time(centers_init[i:i+1, :], station_locs, phase_type)
-        elif n_features == 2: #(time, amp)
-            means[i, :, 0:1] = calc_time(centers_init[i:i+1, :-1], station_locs, phase_type)
-            means[i, :, 1:2] = X[:,1:2]
+        if n_features == 1:  # (time,)
+            means[i, :, :] = calc_time(centers_init[i : i + 1, :], station_locs, phase_type)
+        elif n_features == 2:  # (time, amp)
+            means[i, :, 0:1] = calc_time(centers_init[i : i + 1, :-1], station_locs, phase_type)
+            means[i, :, 1:2] = X[:, 1:2]
             # means[i, :, 1:2] = calc_amp(self.centers_init[i, -1:], self.centers_init[i:i+1, :-1], self.station_locs)
         else:
             raise ValueError(f"n_features = {n_features} > 2!")
@@ -365,49 +449,53 @@ def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
     # prob_sum[prob_sum == 0] = 1.0
     # resp = prob / prob_sum
 
-    dist = np.linalg.norm(means - X, axis=-1).T # (n_components, n_samples, n_features) -> (n_samples, n_components)
+    dist = np.linalg.norm(means - X, axis=-1).T  # (n_components, n_samples, n_features) -> (n_samples, n_components)
     resp = np.exp(-dist)
     resp_sum = resp.sum(axis=1, keepdims=True)
     resp_sum[resp_sum == 0] = 1.0
     resp = resp / resp_sum
 
     if n_features == 2:
-        for i in range(n_components): 
-            centers[i, -1:] = calc_mag(X[:,1:2], centers_init[i:i+1,:-1], station_locs, resp[:, i:i+1])
+        for i in range(n_components):
+            centers[i, -1:] = calc_mag(X[:, 1:2], centers_init[i : i + 1, :-1], station_locs, resp[:, i : i + 1])
 
     return resp, centers, means
 
 
 #########################################################################################################################
 ## L2 norm
-def diff_and_grad(vars, data, station_locs, phase_type, vel={"p":6.0, "s":6.0/1.75}):
+def diff_and_grad(vars, data, station_locs, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75}):
     """
     data: (n_sample, t)
     """
     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
     # loc, t = vars[:,:-1], vars[:,-1:]
-    dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
-    y = dist/v - (data - vars[:,-1:])
+    dist = np.sqrt(np.sum((station_locs - vars[:, :-1]) ** 2, axis=1, keepdims=True))
+    y = dist / v - (data - vars[:, -1:])
     J = np.zeros([data.shape[0], vars.shape[1]])
-    J[:, :-1] = (vars[:,:-1] - station_locs)/(dist + 1e-6)/v
+    J[:, :-1] = (vars[:, :-1] - station_locs) / (dist + 1e-6) / v
     J[:, -1] = 1
     return y, J
 
-def newton_method(vars, data, station_locs, phase_type, weight, max_iter=20, convergence=1, vel={"p":6.0, "s":6.0/1.75}):
-    for i in range(max_iter): 
+
+def newton_method(
+    vars, data, station_locs, phase_type, weight, max_iter=20, convergence=1, vel={"p": 6.0, "s": 6.0 / 1.75}
+):
+    for i in range(max_iter):
         prev = vars.copy()
         y, J = diff_and_grad(vars, data, station_locs, phase_type, vel=vel)
         JTJ = np.dot(J.T, weight * J)
         I = np.zeros_like(JTJ)
         np.fill_diagonal(I, 1e-3)
-        vars -= np.dot(np.linalg.inv(JTJ + I) , np.dot(J.T, y * weight)).T
+        vars -= np.dot(np.linalg.inv(JTJ + I), np.dot(J.T, y * weight)).T
         if (np.sum(np.abs(vars - prev))) < convergence:
             return vars
     return vars
 
+
 ## l1 norm
 # def loss_and_grad(vars, data, station_locs, phase_type, weight, vel={"p":6.0, "s":6.0/1.75}):
-    
+
 #     v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
 #     vars = vars[np.newaxis, :]
 #     dist = np.sqrt(np.sum((station_locs - vars[:,:-1])**2, axis=1, keepdims=True))
