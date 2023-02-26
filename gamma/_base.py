@@ -7,16 +7,15 @@
 import warnings
 from abc import ABCMeta, abstractmethod
 from time import time
-
 import numpy as np
 from scipy.special import logsumexp
-
 from sklearn import cluster
 from sklearn.base import BaseEstimator
 from sklearn.base import DensityMixin
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils import check_array, check_random_state
 from sklearn.utils.validation import check_is_fitted
+
 from .seismic_ops import initialize_centers
 
 def _check_shape(param, param_shape, name):

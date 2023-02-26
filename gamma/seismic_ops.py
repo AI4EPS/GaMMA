@@ -1,19 +1,8 @@
 import itertools
-import multiprocessing
-import multiprocessing as mp
-import os
-from functools import partial
-from multiprocessing import Manager, Pool, Process
-
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn.functional as F
 import torch.optim
-from tqdm import tqdm
-from dataclasses import dataclass
-from datetime import datetime
 import scipy.optimize
 
 ###################################### Eikonal Solver ######################################

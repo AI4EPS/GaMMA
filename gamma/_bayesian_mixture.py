@@ -5,8 +5,9 @@
 
 import math
 import numpy as np
-from scipy import linalg
 from scipy.special import betaln, digamma, gammaln
+from sklearn.utils import check_array
+from sklearn.utils.validation import _deprecate_positional_args
 
 from ._base import BaseMixture, _check_shape
 from ._gaussian_mixture import _check_precision_matrix
@@ -16,8 +17,6 @@ from ._gaussian_mixture import _compute_precision_cholesky
 from ._gaussian_mixture import _estimate_gaussian_parameters
 from ._gaussian_mixture import _estimate_log_gaussian_prob
 from .seismic_ops import *
-from sklearn.utils import check_array
-from sklearn.utils.validation import _deprecate_positional_args
 
 
 def _log_dirichlet_norm(dirichlet_concentration):
