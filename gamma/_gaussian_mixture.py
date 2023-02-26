@@ -301,7 +301,7 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_l
         if n_features == 1:
             loc, loss = calc_loc(X[:,:1], phase_type, station_locs, resp[:, i:i+1], centers_prev[i:i+1, :], vel=vel, bounds=bounds, eikonal=eikonal)
             centers[i:i+1, :] = loc
-        if n_features == 2:
+        elif n_features == 2:
             loc, loss = calc_loc(X[:,:1], phase_type, station_locs, resp[:, i:i+1], centers_prev[i:i+1, :-1], vel=vel, bounds=bounds, eikonal=eikonal)
             centers[i:i+1, :-1] = loc
             centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs, resp[:,i:i+1])

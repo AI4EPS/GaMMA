@@ -77,7 +77,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
 
     if 'ncpu' not in config:
-        config['ncpu'] = max(1, mp.cpu_count()//2)
+        config['ncpu'] = max(1, mp.cpu_count()-1)
     manager = mp.Manager()
     events = manager.list([])
     assignment = manager.list([])  ## from picks to events
