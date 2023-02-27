@@ -262,7 +262,7 @@ def eikoloc(
     add_eqt=False,
     gamma=0.1,
     max_iter=1000,
-    convergence=1e-3,
+    convergence=1e-9,
 ):
     event_loc = torch.tensor(event_loc0, dtype=torch.float32, requires_grad=True, device=device)
     if bounds is not None:
@@ -280,7 +280,7 @@ def eikoloc(
     weight_s = weight[s_index]
 
     # %% optimization
-    optimizer = torch.optim.LBFGS(params=[event_loc], max_iter=max_iter, line_search_fn="strong_wolfe")
+    optimizer = torch.optim.LBFGS(params=[event_loc], max_iter=max_iter, line_search_fn="strong_wolfe", tolerance_change=convergence)
 
     def closure():
         optimizer.zero_grad()
