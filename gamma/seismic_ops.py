@@ -385,7 +385,7 @@ def initialize_eikonal(config):
     m, n = len(rgrid), len(zgrid)
 
     vel = config["vel"]
-    zz, vp, vs = vel["z"], vel["vp"], vel["vs"]
+    zz, vp, vs = vel["z"], vel["p"], vel["s"]
     vp1d = np.interp(zgrid, zz, vp)
     vs1d = np.interp(zgrid, zz, vs)
     vp = np.ones((m, n)) * vp1d
