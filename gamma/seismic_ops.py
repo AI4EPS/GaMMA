@@ -79,8 +79,8 @@ def eikonal_solve(u, f, h):
 
 
 def _interp(time_table, r, z, rgrid, zgrid, h):
-    ir0 = (r - rgrid[0, 0]).floor_divide(h).clamp(0, rgrid.shape[0] - 2).long()
-    iz0 = (z - zgrid[0, 0]).floor_divide(h).clamp(0, zgrid.shape[1] - 2).long()
+    ir0 = (r - rgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, rgrid.shape[0] - 2).long()
+    iz0 = (z - zgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, zgrid.shape[1] - 2).long()
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
@@ -339,7 +339,7 @@ def calc_loc(
     eikonal=None,
     vel={"p": 6.0, "s": 6.0 / 1.75},
     bounds=None,
-    max_iter=10,
+    max_iter=100,
     convergence=1e-3,
 ):
     if eikonal is None:
