@@ -67,12 +67,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         )
         labels = db.labels_
         unique_labels = set(labels)
+        unique_labels.remove(-1)
     else:
         labels = np.zeros(len(data))
         unique_labels = [0]
-    unique_labels.remove(-1)
-
-
 
     if 'ncpu' not in config:
         config['ncpu'] = max(1, mp.cpu_count()-1)
