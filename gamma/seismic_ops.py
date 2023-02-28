@@ -1,19 +1,8 @@
 import itertools
-import multiprocessing
-import multiprocessing as mp
-import os
-from functools import partial
-from multiprocessing import Manager, Pool, Process
-
-import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn.functional as F
 import torch.optim
-from tqdm import tqdm
-from dataclasses import dataclass
-from datetime import datetime
 import scipy.optimize
 
 ###################################### Eikonal Solver ######################################
@@ -90,8 +79,8 @@ def eikonal_solve(u, f, h):
 
 
 def _interp(time_table, r, z, rgrid, zgrid, h):
-    ir0 = (r - rgrid[0, 0]).floor_divide(h).clamp(0, rgrid.shape[0] - 2).long()
-    iz0 = (z - zgrid[0, 0]).floor_divide(h).clamp(0, zgrid.shape[1] - 2).long()
+    ir0 = (r - rgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, rgrid.shape[0] - 2).long()
+    iz0 = (z - zgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, zgrid.shape[1] - 2).long()
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
@@ -273,7 +262,7 @@ def eikoloc(
     add_eqt=False,
     gamma=0.1,
     max_iter=1000,
-    convergence=1e-3,
+    convergence=1e-9,
 ):
     event_loc = torch.tensor(event_loc0, dtype=torch.float32, requires_grad=True, device=device)
     if bounds is not None:
@@ -291,7 +280,7 @@ def eikoloc(
     weight_s = weight[s_index]
 
     # %% optimization
-    optimizer = torch.optim.LBFGS(params=[event_loc], max_iter=max_iter, line_search_fn="strong_wolfe")
+    optimizer = torch.optim.LBFGS(params=[event_loc], max_iter=max_iter, line_search_fn="strong_wolfe", tolerance_change=convergence)
 
     def closure():
         optimizer.zero_grad()
@@ -396,7 +385,7 @@ def initialize_eikonal(config):
     m, n = len(rgrid), len(zgrid)
 
     vel = config["vel"]
-    zz, vp, vs = vel["z"], vel["vp"], vel["vs"]
+    zz, vp, vs = vel["z"], vel["p"], vel["s"]
     vp1d = np.interp(zgrid, zz, vp)
     vs1d = np.interp(zgrid, zz, vs)
     vp = np.ones((m, n)) * vp1d

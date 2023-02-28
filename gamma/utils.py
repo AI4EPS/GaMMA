@@ -1,10 +1,8 @@
 import multiprocessing as mp
 from datetime import datetime
-
 import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN
-from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
@@ -65,7 +63,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     if ("use_dbscan" in config) and config["use_dbscan"]:
         # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(data[:, 0:1])
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-            np.hstack([data[:, 0:1], locs[:, :2] / vel["p"]])
+            np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])])
         )
         labels = db.labels_
         unique_labels = set(labels)

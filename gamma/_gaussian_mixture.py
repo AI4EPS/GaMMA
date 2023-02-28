@@ -5,14 +5,13 @@
 # License: BSD 3 clause
 
 import numpy as np
-
 from scipy import linalg
-
-from ._base import BaseMixture, _check_shape
 from sklearn.utils import check_array
 from sklearn.utils.extmath import row_norms
 from sklearn.utils.validation import _deprecate_positional_args
+
 from .seismic_ops import *
+from ._base import BaseMixture, _check_shape
 
 ###############################################################################
 # Gaussian mixture shape checkers used by the GaussianMixture class

@@ -1,8 +1,6 @@
 import os
-import pickle
-from datetime import datetime
 from json import dumps
-from typing import Dict, List, NamedTuple, Union
+from typing import Dict, List, Union
 
 import numpy as np
 import pandas as pd
@@ -11,8 +9,7 @@ from kafka import KafkaProducer
 from pydantic import BaseModel
 from pyproj import Proj
 
-from gamma import BayesianGaussianMixture, GaussianMixture
-from gamma.utils import convert_picks_csv, association, from_seconds
+from gamma.utils import association
 
 # Kafak producer
 use_kafka = False
