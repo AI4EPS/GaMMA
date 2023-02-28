@@ -339,7 +339,7 @@ def calc_loc(
     eikonal=None,
     vel={"p": 6.0, "s": 6.0 / 1.75},
     bounds=None,
-    max_iter=100,
+    max_iter=10,
     convergence=1e-3,
 ):
     if eikonal is None:
