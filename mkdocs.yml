@@ -6,8 +6,8 @@ repo_name: 'AI4EPS/GaMMA'
 repo_url: 'https://github.com/ai4eps/GaMMA'
 nav:
     - Overview: README.md
-    - Interactive Example: example_interactive.ipynb
-    - Synthetic Example: example_synthetic.ipynb
+#    - Interactive Example: example_interactive.ipynb
+#    - Synthetic Example: example_synthetic.ipynb
     - PhaseNet Example: example_phasenet.ipynb
     - Seisbench Example: example_seisbench.ipynb
 theme:
