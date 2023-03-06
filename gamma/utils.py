@@ -67,7 +67,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         )
         labels = db.labels_
         unique_labels = set(labels)
-        unique_labels.remove(-1)
+        unique_labels.difference([-1])
     else:
         labels = np.zeros(len(data))
         unique_labels = [0]
