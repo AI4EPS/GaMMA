@@ -339,7 +339,7 @@ def calc_loc(
     eikonal=None,
     vel={"p": 6.0, "s": 6.0 / 1.75},
     bounds=None,
-    max_iter=10,
+    max_iter=100,
     convergence=1e-3,
 ):
     if eikonal is None:
@@ -438,11 +438,14 @@ def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
     # prob_sum[prob_sum == 0] = 1.0
     # resp = prob / prob_sum
 
-    dist = np.linalg.norm(means - X, axis=-1).T  # (n_components, n_samples, n_features) -> (n_samples, n_components)
-    resp = np.exp(-dist)
-    resp_sum = resp.sum(axis=1, keepdims=True)
-    resp_sum[resp_sum == 0] = 1.0
-    resp = resp / resp_sum
+    # dist = np.linalg.norm(means - X, axis=-1).T  # (n_components, n_samples, n_features) -> (n_samples, n_components)
+    # resp = np.exp(-dist)
+    # resp_sum = resp.sum(axis=1, keepdims=True)
+    # resp_sum[resp_sum == 0] = 1.0
+    # resp = resp / resp_sum
+    dist = np.linalg.norm(means - X, axis=-1) # (n_components, n_samples, n_features) -> (n_components, n_samples)
+    resp = np.exp(-dist/np.median(dist, axis=0, keepdims=True)).T 
+    resp /= np.sum(resp, axis=1, keepdims=True) # (n_components, n_samples)
 
     if n_features == 2:
         for i in range(n_components):
