@@ -49,7 +49,6 @@ def convert_picks_csv(picks, stations, config):
 
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
-
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
         picks, stations, config
     )
@@ -72,23 +71,81 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         labels = np.zeros(len(data))
         unique_labels = [0]
 
-    if 'ncpu' not in config:
-        config['ncpu'] = max(1, mp.cpu_count()-1)
-    manager = mp.Manager()
-    events = manager.list([])
-    assignment = manager.list([])  ## from picks to events
-    lock = manager.Lock()
-    event_idx = manager.Value('i', event_idx0)
+    if "ncpu" not in config:
+        config["ncpu"] = min(len(unique_labels), max(1, mp.cpu_count() - 1))
 
-    print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
-    with mp.Pool(config['ncpu']) as p:
-        p.starmap(associate, [[data[labels == k], locs[labels == k], phase_type[labels == k], phase_weight[labels == k], pick_idx[labels==k], pick_station_id[labels==k], config, timestamp0, vel, method, events, assignment, event_idx, lock] for k in unique_labels])
+    if len(unique_labels) == 1:
+        events = []
+        assignment = []
+        event_idx = 0
+        print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
+        events, assignment = associate(
+            data,
+            locs,
+            phase_type,
+            phase_weight,
+            pick_idx,
+            pick_station_id,
+            config,
+            timestamp0,
+            vel,
+            method,
+            events,
+            assignment,
+            event_idx,
+        )
+    else:
+        manager = mp.Manager()
+        events = manager.list([])
+        assignment = manager.list([])  ## from picks to events
+        lock = manager.Lock()
+        event_idx = manager.Value("i", event_idx0)
 
-    return list(events), list(assignment)#, event_idx.value
+        print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
+        with mp.Pool(config["ncpu"]) as p:
+            p.starmap(
+                associate,
+                [
+                    [
+                        data[labels == k],
+                        locs[labels == k],
+                        phase_type[labels == k],
+                        phase_weight[labels == k],
+                        pick_idx[labels == k],
+                        pick_station_id[labels == k],
+                        config,
+                        timestamp0,
+                        vel,
+                        method,
+                        events,
+                        assignment,
+                        event_idx,
+                        lock,
+                    ]
+                    for k in unique_labels
+                ],
+            )
 
-def associate(data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_id_, config, timestamp0, vel, method, events, assignment, event_idx, lock):
+    return list(events), list(assignment)  # , event_idx.value
 
-    print('.', end='')
+
+def associate(
+    data_,
+    locs_,
+    phase_type_,
+    phase_weight_,
+    pick_idx_,
+    pick_station_id_,
+    config,
+    timestamp0,
+    vel,
+    method,
+    events,
+    assignment,
+    event_idx,
+    lock=None,
+):
+    print(".", end="")
 
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
         return
@@ -108,7 +165,7 @@ def associate(data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_
         covariance_prior = np.array([[covariance_prior_pre[0], 0.0], [0.0, covariance_prior_pre[1]]])
     else:
         covariance_prior = np.array([[covariance_prior_pre[0]]])
-        data_ = data_[:, 0:1]        
+        data_ = data_[:, 0:1]
 
     if method == "BGMM":
         gmm = BayesianGaussianMixture(
@@ -162,7 +219,13 @@ def associate(data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_
             continue
 
         ## filter by time
-        t_ = calc_time(gmm.centers_[i : i + 1, : len(config["dims"]) + 1], tmp_locs, tmp_phase_type, vel=vel, eikonal=config["eikonal"])
+        t_ = calc_time(
+            gmm.centers_[i : i + 1, : len(config["dims"]) + 1],
+            tmp_locs,
+            tmp_phase_type,
+            vel=vel,
+            eikonal=config["eikonal"],
+        )
         diff_t = np.abs(t_ - tmp_data[:, 0:1])
         idx_t = (diff_t < config["max_sigma11"]).squeeze(axis=1)
         idx_filter = idx_t
@@ -210,49 +273,64 @@ def associate(data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_
             if len(tmp_data[idx_filter & (tmp_phase_type == "s")]) < config["min_s_picks_per_eq"]:
                 continue
 
-        with lock:
-            event = {
-                # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
-                "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0).isoformat(
-                    timespec="milliseconds"
-                ),
-                # "time(s)": gmm.centers_[i, len(config["dims"])],
-                "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
-                "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
-                "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
-                "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
-                "gamma_score": prob_eq[i],
-                "number_picks": len(tmp_data[idx_filter]),
-                "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
-                "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
-                "event_index": event_idx.value,
-            }
-            for j, k in enumerate(config["dims"]):  ## add location
-                event[k] = gmm.centers_[i, j]
-            events.append(event)
-            for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
-                assignment.append((pi, event_idx.value, pr))
+        if lock is not None:
+            lock.acquire()
+
+        if not isinstance(event_idx, int):
+            event_idx_value = event_idx.value
+        else:
+            event_idx_value = event_idx
+
+        event = {
+            # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
+            "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0).isoformat(
+                timespec="milliseconds"
+            ),
+            # "time(s)": gmm.centers_[i, len(config["dims"])],
+            "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
+            "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
+            "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
+            "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
+            "gamma_score": prob_eq[i],
+            "number_picks": len(tmp_data[idx_filter]),
+            "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
+            "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
+            "event_index": event_idx_value,
+        }
+        for j, k in enumerate(config["dims"]):  ## add location
+            event[k] = gmm.centers_[i, j]
+        events.append(event)
+
+        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
+            assignment.append((pi, event_idx_value, pr))
+
+        if (event_idx_value + 1) % 100 == 0:
+            print(f"\nFinish {event_idx_value} events")
+
+        if not isinstance(event_idx, int):
             event_idx.value += 1
-            if event_idx.value % 100 == 0:
-                print(f"\nFinish {event_idx.value} events")
+        else:
+            event_idx += 1
+
+        if lock is not None:
+            lock.release()
 
     return events, assignment
 
 
 def init_centers(config, data_, locs_, time_range):
-
     if "initial_points" in config:
         initial_points = config["initial_points"]
         if not isinstance(initial_points, list):
             initial_points = [initial_points, initial_points, initial_points]
     else:
-        initial_points = [1,1,1]
-    
-    if ((np.prod(initial_points) + 1) * config["oversample_factor"]) > len(data_):
-        initial_points = [1,1,1]
+        initial_points = [1, 1, 1]
 
-    x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0]+2)[1:-1]
-    y_init = np.linspace(config["y(km)"][0], config["y(km)"][1], initial_points[1]+2)[1:-1]
+    if ((np.prod(initial_points) + 1) * config["oversample_factor"]) > len(data_):
+        initial_points = [1, 1, 1]
+
+    x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0] + 2)[1:-1]
+    y_init = np.linspace(config["y(km)"][0], config["y(km)"][1], initial_points[1] + 2)[1:-1]
     z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
     x_init = np.broadcast_to(x_init[:, np.newaxis, np.newaxis], initial_points).reshape(-1)
     y_init = np.broadcast_to(y_init[np.newaxis, :, np.newaxis], initial_points).reshape(-1)
@@ -267,35 +345,29 @@ def init_centers(config, data_, locs_, time_range):
 
     num_sta = len(np.unique(locs_, axis=0))
     num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
-    num_t_init = min(int(num_t_init), max(len(data_)//num_xyz_init, 1))
-    t_init = np.sort(data_[:, 0])[::max(len(data_)//num_t_init, 1)][:num_t_init]
+    num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
+    t_init = np.sort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
     # t_init = np.linspace(
     #         data_[:, 0].min() - 0.1 * time_range,
     #         data_[:, 0].max() + 0.1 * time_range,
     #         num_t_init)
-    
+
     x_init = np.broadcast_to(x_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
     y_init = np.broadcast_to(y_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
     z_init = np.broadcast_to(z_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
     t_init = np.broadcast_to(t_init[np.newaxis, :], (num_xyz_init, num_t_init)).reshape(-1)
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
-        centers_init = np.vstack(
-                [x_init, y_init, z_init, t_init]
-            ).T
+        centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
     elif config["dims"] == ["x(km)", "y(km)"]:
-        centers_init = np.vstack(
-                [x_init, y_init, t_init]
-            ).T
+        centers_init = np.vstack([x_init, y_init, t_init]).T
     elif config["dims"] == ["x(km)"]:
-        centers_init = np.vstack(
-                [x_init, t_init]
-            ).T
+        centers_init = np.vstack([x_init, t_init]).T
     else:
         raise (ValueError("Unsupported dims"))
-    
+
     if config["use_amplitude"]:
-        centers_init = np.hstack([centers_init, 1.0*np.ones((len(centers_init), 1))]) # init magnitude to 1.0
+        centers_init = np.hstack([centers_init, 1.0 * np.ones((len(centers_init), 1))])  # init magnitude to 1.0
 
     # import matplotlib.pyplot as plt
     # plt.figure()
@@ -317,5 +389,5 @@ def init_centers(config, data_, locs_, time_range):
     # plt.figure()
     # plt.scatter(t_init, z_init)
     # plt.savefig("initial_points_tz.png")
-    
+
     return centers_init
