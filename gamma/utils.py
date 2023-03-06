@@ -148,7 +148,7 @@ def associate(
     print(".", end="")
 
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
-        return
+        return [], []
 
     time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
