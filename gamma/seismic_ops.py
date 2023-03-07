@@ -340,7 +340,7 @@ def calc_loc(
     vel={"p": 6.0, "s": 6.0 / 1.75},
     bounds=None,
     max_iter=100,
-    convergence=1e-3,
+    convergence=1e-6,
 ):
     if eikonal is None:
         event_loc, loss = linloc(
