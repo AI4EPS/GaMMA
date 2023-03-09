@@ -1,9 +1,13 @@
 import itertools
 import numpy as np
-import torch
-import torch.nn.functional as F
-import torch.optim
 import scipy.optimize
+try:
+    import torch
+    import torch.nn.functional as F
+    import torch.optim
+except:
+    pass
+
 
 ###################################### Eikonal Solver ######################################
 # |\nabla u| = f
