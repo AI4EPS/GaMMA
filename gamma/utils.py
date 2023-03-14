@@ -24,12 +24,12 @@ def convert_picks_csv(picks, stations, config):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
     if type(picks["timestamp"].iloc[0]) is str:
         if import_swifter:
-            picks["timestamp"] = picks["timestamp"].swifter.allow_dask_on_strings(enable=True).apply(lambda x: datetime.fromisoformat(x))
+            picks["timestamp"] = picks["timestamp"].swifter.apply(lambda x: datetime.fromisoformat(x))
         else:
             picks["timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
     if import_swifter:
         t = (
-        picks["timestamp"].swifter.allow_dask_on_strings(enable=True)
+        picks["timestamp"].swifter
         .apply(lambda x: x.tz_convert("UTC").timestamp() if x.tzinfo is not None else x.tz_localize("UTC").timestamp())
         .to_numpy()
     )
@@ -44,7 +44,7 @@ def convert_picks_csv(picks, stations, config):
     t = t - timestamp0
     if config["use_amplitude"]:
         if import_swifter:
-            a = picks["amp"].swifter.allow_dask_on_strings(enable=True).apply(lambda x: np.log10(x * 1e2)).to_numpy()
+            a = picks["amp"].swifter.apply(lambda x: np.log10(x * 1e2)).to_numpy()
         else:
             a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy()  ##cm/s
         data = np.stack([t, a]).T
@@ -53,12 +53,12 @@ def convert_picks_csv(picks, stations, config):
     meta = stations.merge(picks["id"], how="right", on="id")
     locs = meta[config["dims"]].to_numpy()
     if import_swifter:
-        phase_type = picks["type"].swifter.allow_dask_on_strings(enable=True).apply(lambda x: x.lower()).to_numpy()
+        phase_type = picks["type"].swifter.apply(lambda x: x.lower()).to_numpy()
     else:
         phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
     if import_swifter:
-        pick_station_id = picks["id"].swifter.allow_dask_on_strings(enable=True).apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
+        pick_station_id = picks["id"].swifter.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
     else:
         pick_station_id = picks.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
     nan_idx = meta.isnull().any(axis=1)
