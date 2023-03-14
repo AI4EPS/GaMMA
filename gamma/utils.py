@@ -58,7 +58,7 @@ def convert_picks_csv(picks, stations, config):
         phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
     if import_swifter:
-        pick_station_id = picks["id"].swifter.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
+        pick_station_id = picks.swifter.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
     else:
         pick_station_id = picks.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
     nan_idx = meta.isnull().any(axis=1)
