@@ -146,12 +146,14 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 associate,
                 [
                     [
-                        data[labels == k],
-                        locs[labels == k],
-                        phase_type[labels == k],
-                        phase_weight[labels == k],
-                        pick_idx[labels == k],
-                        pick_station_id[labels == k],
+                        k,
+                        labels,
+                        data,
+                        locs,
+                        phase_type,
+                        phase_weight,
+                        pick_idx,
+                        pick_station_id,
                         config,
                         timestamp0,
                         vel,
@@ -170,12 +172,14 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
 
 def associate(
-    data_,
-    locs_,
-    phase_type_,
-    phase_weight_,
-    pick_idx_,
-    pick_station_id_,
+    k,
+    labels,
+    data,
+    locs,
+    phase_type,
+    phase_weight,
+    pick_idx,
+    pick_station_id,
     config,
     timestamp0,
     vel,
@@ -186,6 +190,13 @@ def associate(
     lock=None,
 ):
     print(".", end="")
+    
+    data_=data[labels==k]
+    locs_=locs[labels==k]
+    phase_type_=phase_type[labels==k]
+    phase_weight_=phase_weight[labels==k]
+    pick_idx_=pick_idx[labels==k]
+    pick_station_id_=pick_station_id[labels==k]
 
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
         return [], []
