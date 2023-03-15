@@ -115,7 +115,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             )
         )
 
-        with mp.Pool(config["ncpu"]) as p:
+        chunk_size = max(len(unique_labels)//(config["ncpu"]*20), 1)
+        with mp.get_context('spawn').Pool(config["ncpu"]) as p:
             results = p.starmap(
                 associate,
                 [
@@ -136,7 +137,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                         lock,
                     ]
                     for k in unique_labels
-                ]
+                ],
+                chunksize=chunk_size,
             )
             # resuts is a list of tuples, each tuple contains two lists events and assignment
             # here we flatten the list of tuples into two lists
