@@ -380,9 +380,6 @@ def associate(
                     event_idx += 1
 
 
-    return events, assignment
-
-
 def init_centers(config, data_, locs_, time_range):
     if "initial_points" in config:
         initial_points = config["initial_points"]
