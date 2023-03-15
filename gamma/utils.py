@@ -167,8 +167,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                         lock,
                     ]
                     for k in unique_labels
-                ],
-                chunksize=1,
+                ]
             )
 
     return list(events), list(assignment)  # , event_idx.value
