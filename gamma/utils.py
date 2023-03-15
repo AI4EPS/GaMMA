@@ -1,5 +1,7 @@
 import multiprocessing as mp
+from collections import Counter
 from datetime import datetime
+
 import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN
@@ -129,14 +131,15 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
 
         # sort unique_labels, so larger jobs are run first
-        unique_labels = sorted(unique_labels, key=lambda x: np.sum(labels == x), reverse=True)
+        counter=Counter(labels)
+        unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
         # print top 20 labels' sizes with essencial information
         print("top 20 labels' sizes:")
         print(
             pd.DataFrame(
                 {
                     "label": unique_labels[:20],
-                    "size": [np.sum(labels == x) for x in unique_labels[:20]],
+                    "size": [counter[x] for x in unique_labels[:20]],
                 }
             )
         )
