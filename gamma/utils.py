@@ -97,7 +97,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     else:
         manager = mp.Manager()
         lock = manager.Lock()
-        event_idx = manager.Value("i", event_idx0)
+        event_idx = manager.Value("i", event_idx0 - 1)
 
         print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
 
@@ -306,13 +306,17 @@ def associate(
         if lock is not None:
             with lock:
                 if not isinstance(event_idx, int):
+                    event_idx.value += 1
                     event_idx_value = event_idx.value
                 else:
+                    event_idx += 1
                     event_idx_value = event_idx
         else:
             if not isinstance(event_idx, int):
+                event_idx.value += 1
                 event_idx_value = event_idx.value
             else:
+                event_idx += 1
                 event_idx_value = event_idx
 
         event = {
@@ -338,25 +342,8 @@ def associate(
         for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
             assignment.append((pi, event_idx_value, pr))
 
-        if lock is not None:
-            with lock:
-                if not isinstance(event_idx, int):
-                    event_idx.value += 1
-                    if event_idx.value % 100 == 0:
-                        print(f"\nFinish {event_idx_value} events")
-                else:
-                    event_idx += 1
-                    if event_idx % 100 == 0:
-                        print(f"\nFinish {event_idx_value} events")
-        else:
-            if not isinstance(event_idx, int):
-                event_idx.value += 1
-                if event_idx.value % 100 == 0:
-                    print(f"\nFinish {event_idx_value} events")
-            else:
-                event_idx += 1
-                if event_idx % 100 == 0:
-                    print(f"\nFinish {event_idx_value} events")
+        if (event_idx_value + 1) % 100 == 0:
+            print(f"\nFinish {event_idx_value} events")
     return events, assignment
 
 
