@@ -1,6 +1,8 @@
 import multiprocessing as mp
 from collections import Counter
 from datetime import datetime
+import traceback
+import functools
 
 import numpy as np
 import pandas as pd
@@ -14,6 +16,19 @@ to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
 # to_seconds = lambda t: datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f").timestamp()
 # from_seconds = lambda t: [datetime.utcfromtimestamp(x).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] for x in t]
+
+def trace_unhandled_exceptions(func):
+    # handle possible exceptions in multiprocessing pool
+    @functools.wraps(func)
+    def wrapped_func(*args, **kwargs):
+        res=None
+        try:
+            res=func(*args, **kwargs)
+        except:
+            print(f"Exception in {func.__name__}")
+            traceback.print_exc()
+        return res
+    return wrapped_func
 
 
 def convert_picks_csv(picks, stations, config):
@@ -172,7 +187,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     return list(events), list(assignment)  # , event_idx.value
 
-
+@trace_unhandled_exceptions
 def associate(
     k,
     labels,
@@ -327,46 +342,43 @@ def associate(
                 continue
 
         if lock is not None:
-            lock.acquire()
+            with lock:
+                if not isinstance(event_idx, int):
+                    event_idx_value = event_idx.value
+                else:
+                    event_idx_value = event_idx
 
-        if not isinstance(event_idx, int):
-            event_idx_value = event_idx.value
-        else:
-            event_idx_value = event_idx
+                event = {
+                    # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
+                    "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0).isoformat(
+                        timespec="milliseconds"
+                    ),
+                    # "time(s)": gmm.centers_[i, len(config["dims"])],
+                    "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
+                    "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
+                    "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
+                    "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
+                    "gamma_score": prob_eq[i],
+                    "number_picks": len(tmp_data[idx_filter]),
+                    "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
+                    "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
+                    "event_index": event_idx_value,
+                }
+                for j, k in enumerate(config["dims"]):  ## add location
+                    event[k] = gmm.centers_[i, j]
+                events.append(event)
 
-        event = {
-            # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
-            "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0).isoformat(
-                timespec="milliseconds"
-            ),
-            # "time(s)": gmm.centers_[i, len(config["dims"])],
-            "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
-            "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
-            "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
-            "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
-            "gamma_score": prob_eq[i],
-            "number_picks": len(tmp_data[idx_filter]),
-            "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
-            "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
-            "event_index": event_idx_value,
-        }
-        for j, k in enumerate(config["dims"]):  ## add location
-            event[k] = gmm.centers_[i, j]
-        events.append(event)
+                for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
+                    assignment.append((pi, event_idx_value, pr))
 
-        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
-            assignment.append((pi, event_idx_value, pr))
+                if (event_idx_value + 1) % 100 == 0:
+                    print(f"\nFinish {event_idx_value} events")
 
-        if (event_idx_value + 1) % 100 == 0:
-            print(f"\nFinish {event_idx_value} events")
+                if not isinstance(event_idx, int):
+                    event_idx.value += 1
+                else:
+                    event_idx += 1
 
-        if not isinstance(event_idx, int):
-            event_idx.value += 1
-        else:
-            event_idx += 1
-
-        if lock is not None:
-            lock.release()
 
     return events, assignment
 
