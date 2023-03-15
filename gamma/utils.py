@@ -17,19 +17,6 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:
 # to_seconds = lambda t: datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f").timestamp()
 # from_seconds = lambda t: [datetime.utcfromtimestamp(x).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] for x in t]
 
-def trace_unhandled_exceptions(func):
-    # handle possible exceptions in multiprocessing pool
-    @functools.wraps(func)
-    def wrapped_func(*args, **kwargs):
-        res=None
-        try:
-            res=func(*args, **kwargs)
-        except:
-            print(f"Exception in {func.__name__}")
-            traceback.print_exc()
-        return res
-    return wrapped_func
-
 
 def convert_picks_csv(picks, stations, config):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
@@ -92,8 +79,6 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         config["ncpu"] = min(len(unique_labels), max(1, mp.cpu_count() - 1))
 
     if len(unique_labels) == 1:
-        events = []
-        assignment = []
         event_idx = 0
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
         events, assignment = associate(
@@ -107,14 +92,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             timestamp0,
             vel,
             method,
-            events,
-            assignment,
             event_idx,
         )
     else:
         manager = mp.Manager()
-        events = manager.list([])
-        assignment = manager.list([])  ## from picks to events
         lock = manager.Lock()
         event_idx = manager.Value("i", event_idx0)
 
@@ -135,7 +116,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         )
 
         with mp.Pool(config["ncpu"]) as p:
-            p.starmap(
+            results = p.starmap(
                 associate,
                 [
                     [
@@ -151,18 +132,21 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                         timestamp0,
                         vel,
                         method,
-                        events,
-                        assignment,
                         event_idx,
                         lock,
                     ]
                     for k in unique_labels
                 ]
             )
+            # resuts is a list of tuples, each tuple contains two lists events and assignment
+            # here we flatten the list of tuples into two lists
+            events, assignment = [],[]
+            for each_events, each_assignment in results:
+                events.extend(each_events)
+                assignment.extend(each_assignment)
 
-    return list(events), list(assignment)  # , event_idx.value
+    return events, assignment # , event_idx.value
 
-@trace_unhandled_exceptions
 def associate(
     k,
     labels,
@@ -176,8 +160,6 @@ def associate(
     timestamp0,
     vel,
     method,
-    events,
-    assignment,
     event_idx,
     lock=None,
 ):
@@ -253,6 +235,9 @@ def associate(
     #  score_sample = gmm.score_samples(data_)
 
     ## filtering
+    events = []
+    assignment = []
+
     for i in range(len(centers_init)):
         tmp_data = data_[pred == i]
         tmp_locs = locs_[pred == i]
@@ -323,36 +308,39 @@ def associate(
                 else:
                     event_idx_value = event_idx
 
-                event = {
-                    # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
-                    "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0).isoformat(
-                        timespec="milliseconds"
-                    ),
-                    # "time(s)": gmm.centers_[i, len(config["dims"])],
-                    "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
-                    "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
-                    "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
-                    "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
-                    "gamma_score": prob_eq[i],
-                    "number_picks": len(tmp_data[idx_filter]),
-                    "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
-                    "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
-                    "event_index": event_idx_value,
-                }
-                for j, k in enumerate(config["dims"]):  ## add location
-                    event[k] = gmm.centers_[i, j]
-                events.append(event)
+        event = {
+            # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
+            "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0).isoformat(
+                timespec="milliseconds"
+            ),
+            # "time(s)": gmm.centers_[i, len(config["dims"])],
+            "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
+            "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
+            "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
+            "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
+            "gamma_score": prob_eq[i],
+            "number_picks": len(tmp_data[idx_filter]),
+            "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
+            "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
+            "event_index": event_idx_value,
+        }
+        for j, k in enumerate(config["dims"]):  ## add location
+            event[k] = gmm.centers_[i, j]
+        events.append(event)
 
-                for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
-                    assignment.append((pi, event_idx_value, pr))
+        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
+            assignment.append((pi, event_idx_value, pr))
 
-                if (event_idx_value + 1) % 100 == 0:
-                    print(f"\nFinish {event_idx_value} events")
+        if (event_idx_value + 1) % 100 == 0:
+            print(f"\nFinish {event_idx_value} events")
 
+        if lock is not None:
+            with lock:
                 if not isinstance(event_idx, int):
                     event_idx.value += 1
                 else:
                     event_idx += 1
+    return events, assignment
 
 
 def init_centers(config, data_, locs_, time_range):
