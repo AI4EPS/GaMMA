@@ -309,6 +309,11 @@ def associate(
                     event_idx_value = event_idx.value
                 else:
                     event_idx_value = event_idx
+        else:
+            if not isinstance(event_idx, int):
+                event_idx_value = event_idx.value
+            else:
+                event_idx_value = event_idx
 
         event = {
             # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
@@ -333,15 +338,25 @@ def associate(
         for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
             assignment.append((pi, event_idx_value, pr))
 
-        if (event_idx_value + 1) % 100 == 0:
-            print(f"\nFinish {event_idx_value} events")
-
         if lock is not None:
             with lock:
                 if not isinstance(event_idx, int):
                     event_idx.value += 1
+                    if event_idx.value % 100 == 0:
+                        print(f"\nFinish {event_idx_value} events")
                 else:
                     event_idx += 1
+                    if event_idx % 100 == 0:
+                        print(f"\nFinish {event_idx_value} events")
+        else:
+            if not isinstance(event_idx, int):
+                event_idx.value += 1
+                if event_idx.value % 100 == 0:
+                    print(f"\nFinish {event_idx_value} events")
+            else:
+                event_idx += 1
+                if event_idx % 100 == 0:
+                    print(f"\nFinish {event_idx_value} events")
     return events, assignment
 
 
