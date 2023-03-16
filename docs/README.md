@@ -38,15 +38,13 @@ Note the association speed is controlled by **dbscan_eps** and **oversampling_fa
 
 - Synthetic Example
 
-See details in the [notebook](https://github.com/wayneweiqiang/GaMMA/blob/master/docs/example_synthetic.ipynb): [example_synthetic.ipynb](example_synthetic.ipynb)
-
 ![Association result](https://raw.githubusercontent.com/wayneweiqiang/GaMMA/master/docs/assets/result_eq05_err0.0_fp0.0_amp1.png)
 
-- Real Example using [PhaseNet](https://wayneweiqiang.github.io/PhaseNet/) picks
+- Example using [PhaseNet](https://wayneweiqiang.github.io/PhaseNet/) picks
 
 See details in the [notebook](https://github.com/wayneweiqiang/GaMMA/blob/master/docs/example_phasenet.ipynb): [example_phasenet.ipynb](example_phasenet.ipynb)
 
-- Real Example using [Seisbench](https://github.com/seisbench/seisbench)
+- Example using [Seisbench](https://github.com/seisbench/seisbench)
 
 See details in the [notebook](https://github.com/seisbench/seisbench/blob/main/examples/03c_catalog_seisbench_gamma.ipynb): [example_seisbench.ipynb](example_seisbench.ipynb)
 
