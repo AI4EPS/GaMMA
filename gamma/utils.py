@@ -1,8 +1,6 @@
 import multiprocessing as mp
 from collections import Counter
 from datetime import datetime
-import traceback
-import functools
 
 import numpy as np
 import pandas as pd
@@ -97,6 +95,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     else:
         manager = mp.Manager()
         lock = manager.Lock()
+        # event_idx0 - 1 as event_idx is increased before use
         event_idx = manager.Value("i", event_idx0 - 1)
 
         print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
