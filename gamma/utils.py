@@ -101,21 +101,22 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
         print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
 
-        # sort unique_labels, so larger jobs are run first
+        # the following sort and shuffle is to make sure jobs are distributed evenly
         counter=Counter(labels)
         unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
         # print top 20 labels' sizes with essencial information
-        print("top 20 labels' sizes:")
-        print(
-            pd.DataFrame(
-                {
-                    "label": unique_labels[:20],
-                    "size": [counter[x] for x in unique_labels[:20]],
-                }
-            )
-        )
+        # print("top 20 labels' sizes:")
+        # print(
+        #     pd.DataFrame(
+        #         {
+        #             "label": unique_labels[:20],
+        #             "size": [counter[x] for x in unique_labels[:20]],
+        #         }
+        #     )
+        # )
         np.random.shuffle(unique_labels)
 
+        # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
         chunk_size = max(len(unique_labels)//(config["ncpu"]*20), 1)
         with mp.get_context('spawn').Pool(config["ncpu"]) as p:
             results = p.starmap(
