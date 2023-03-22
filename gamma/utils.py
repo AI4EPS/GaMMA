@@ -1,5 +1,7 @@
 import multiprocessing as mp
+from collections import Counter
 from datetime import datetime
+
 import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN
@@ -66,7 +68,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         )
         labels = db.labels_
         unique_labels = set(labels)
-        unique_labels.difference([-1])
+        unique_labels = unique_labels.difference([-1])
     else:
         labels = np.zeros(len(data))
         unique_labels = [0]
@@ -75,8 +77,6 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         config["ncpu"] = min(len(unique_labels), max(1, mp.cpu_count() - 1))
 
     if len(unique_labels) == 1:
-        events = []
-        assignment = []
         event_idx = 0
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
         events, assignment = associate(
@@ -90,62 +90,90 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             timestamp0,
             vel,
             method,
-            events,
-            assignment,
             event_idx,
         )
     else:
         manager = mp.Manager()
-        events = manager.list([])
-        assignment = manager.list([])  ## from picks to events
         lock = manager.Lock()
-        event_idx = manager.Value("i", event_idx0)
+        # event_idx0 - 1 as event_idx is increased before use
+        event_idx = manager.Value("i", event_idx0 - 1)
 
         print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
-        with mp.Pool(config["ncpu"]) as p:
-            p.starmap(
+
+        # the following sort and shuffle is to make sure jobs are distributed evenly
+        counter=Counter(labels)
+        unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
+        # print top 20 labels' sizes with essencial information
+        # print("top 20 labels' sizes:")
+        # print(
+        #     pd.DataFrame(
+        #         {
+        #             "label": unique_labels[:20],
+        #             "size": [counter[x] for x in unique_labels[:20]],
+        #         }
+        #     )
+        # )
+        np.random.shuffle(unique_labels)
+
+        # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
+        chunk_size = max(len(unique_labels)//(config["ncpu"]*20), 1)
+        with mp.get_context('spawn').Pool(config["ncpu"]) as p:
+            results = p.starmap(
                 associate,
                 [
                     [
-                        data[labels == k],
-                        locs[labels == k],
-                        phase_type[labels == k],
-                        phase_weight[labels == k],
-                        pick_idx[labels == k],
-                        pick_station_id[labels == k],
+                        k,
+                        labels,
+                        data,
+                        locs,
+                        phase_type,
+                        phase_weight,
+                        pick_idx,
+                        pick_station_id,
                         config,
                         timestamp0,
                         vel,
                         method,
-                        events,
-                        assignment,
                         event_idx,
                         lock,
                     ]
                     for k in unique_labels
                 ],
+                chunksize=chunk_size,
             )
+            # resuts is a list of tuples, each tuple contains two lists events and assignment
+            # here we flatten the list of tuples into two lists
+            events, assignment = [],[]
+            for each_events, each_assignment in results:
+                events.extend(each_events)
+                assignment.extend(each_assignment)
 
-    return list(events), list(assignment)  # , event_idx.value
-
+    return events, assignment # , event_idx.value
 
 def associate(
-    data_,
-    locs_,
-    phase_type_,
-    phase_weight_,
-    pick_idx_,
-    pick_station_id_,
+    k,
+    labels,
+    data,
+    locs,
+    phase_type,
+    phase_weight,
+    pick_idx,
+    pick_station_id,
     config,
     timestamp0,
     vel,
     method,
-    events,
-    assignment,
     event_idx,
     lock=None,
 ):
     print(".", end="")
+    
+    data_=data[labels==k]
+    locs_=locs[labels==k]
+    phase_type_=phase_type[labels==k]
+    phase_weight_=phase_weight[labels==k]
+    pick_idx_=pick_idx[labels==k]
+    pick_station_id_=pick_station_id[labels==k]
 
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
         return [], []
@@ -210,6 +238,9 @@ def associate(
     #  score_sample = gmm.score_samples(data_)
 
     ## filtering
+    events = []
+    assignment = []
+
     for i in range(len(centers_init)):
         tmp_data = data_[pred == i]
         tmp_locs = locs_[pred == i]
@@ -274,12 +305,20 @@ def associate(
                 continue
 
         if lock is not None:
-            lock.acquire()
-
-        if not isinstance(event_idx, int):
-            event_idx_value = event_idx.value
+            with lock:
+                if not isinstance(event_idx, int):
+                    event_idx.value += 1
+                    event_idx_value = event_idx.value
+                else:
+                    event_idx += 1
+                    event_idx_value = event_idx
         else:
-            event_idx_value = event_idx
+            if not isinstance(event_idx, int):
+                event_idx.value += 1
+                event_idx_value = event_idx.value
+            else:
+                event_idx += 1
+                event_idx_value = event_idx
 
         event = {
             # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
@@ -306,15 +345,6 @@ def associate(
 
         if (event_idx_value + 1) % 100 == 0:
             print(f"\nFinish {event_idx_value} events")
-
-        if not isinstance(event_idx, int):
-            event_idx.value += 1
-        else:
-            event_idx += 1
-
-        if lock is not None:
-            lock.release()
-
     return events, assignment
 
 
