@@ -80,6 +80,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         event_idx = 0
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
         events, assignment = associate(
+            list(unique_labels)[0],
             data,
             locs,
             phase_type,
@@ -103,16 +104,6 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         # the following sort and shuffle is to make sure jobs are distributed evenly
         counter=Counter(labels)
         unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
-        # print top 20 labels' sizes with essencial information
-        # print("top 20 labels' sizes:")
-        # print(
-        #     pd.DataFrame(
-        #         {
-        #             "label": unique_labels[:20],
-        #             "size": [counter[x] for x in unique_labels[:20]],
-        #         }
-        #     )
-        # )
         np.random.shuffle(unique_labels)
 
         # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
