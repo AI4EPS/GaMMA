@@ -379,37 +379,48 @@ def calc_loc(
 
 
 def initialize_eikonal(config):
-    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
-    zlim = config["zlim"]
-    h = config["h"]
-    edge_grids = 3
+    if {'up', 'us', 'rgrid', 'zgrid', 'h'} <= set(config.keys()):
+        config['up'] = torch.load(config['up'])
+        config['us'] = torch.load(config['us'])
+        config['rgrid'] = torch.load(config['rgrid'])
+        config['zgrid'] = torch.load(config['zgrid'])
+    else:
+        rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
+        zlim = config["zlim"]
+        h = config["h"]
+        edge_grids = 3
 
-    rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
-    zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
-    m, n = len(rgrid), len(zgrid)
+        rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
+        zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
+        m, n = len(rgrid), len(zgrid)
 
-    vel = config["vel"]
-    zz, vp, vs = vel["z"], vel["p"], vel["s"]
-    vp1d = np.interp(zgrid, zz, vp)
-    vs1d = np.interp(zgrid, zz, vs)
-    vp = np.ones((m, n)) * vp1d
-    vs = np.ones((m, n)) * vs1d
+        vel = config["vel"]
+        zz, vp, vs = vel["z"], vel["p"], vel["s"]
+        vp1d = np.interp(zgrid, zz, vp)
+        vs1d = np.interp(zgrid, zz, vs)
+        vp = np.ones((m, n)) * vp1d
+        vs = np.ones((m, n)) * vs1d
 
-    up = 1000 * np.ones((m, n))
-    up[edge_grids, edge_grids] = 0.0
-    up = eikonal_solve(up, vp, h)
+        up = 1000 * np.ones((m, n))
+        up[edge_grids, edge_grids] = 0.0
+        up = eikonal_solve(up, vp, h)
 
-    us = 1000 * np.ones((m, n))
-    us[edge_grids, edge_grids] = 0.0
-    us = eikonal_solve(us, vs, h)
+        us = 1000 * np.ones((m, n))
+        us[edge_grids, edge_grids] = 0.0
+        us = eikonal_solve(us, vs, h)
 
-    up = torch.tensor(up, dtype=torch.float32)
-    us = torch.tensor(us, dtype=torch.float32)
-    rgrid = torch.tensor(rgrid, dtype=torch.float32)
-    zgrid = torch.tensor(zgrid, dtype=torch.float32)
-    rgrid, zgrid = torch.meshgrid(rgrid, zgrid, indexing="ij")
+        up = torch.tensor(up, dtype=torch.float32)
+        us = torch.tensor(us, dtype=torch.float32)
+        rgrid = torch.tensor(rgrid, dtype=torch.float32)
+        zgrid = torch.tensor(zgrid, dtype=torch.float32)
+        rgrid, zgrid = torch.meshgrid(rgrid, zgrid, indexing="ij")
+        if config['save']:
+            torch.save(up, 'up.pt')
+            torch.save(us, 'us.pt')
+            torch.save(rgrid, 'rgrid.pt')
+            torch.save(zgrid, 'zgrid.pt')
 
-    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
+        config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
 
     return config
 
