@@ -108,7 +108,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
         # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
         chunk_size = max(len(unique_labels)//(config["ncpu"]*20), 1)
-        with mp.get_context('spawn').Pool(config["ncpu"]) as p:
+        with mp.Pool(config["ncpu"]) as p:
             results = p.starmap(
                 associate,
                 [

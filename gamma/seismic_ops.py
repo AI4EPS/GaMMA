@@ -1,6 +1,8 @@
 import itertools
 import numpy as np
 import scipy.optimize
+import shelve
+from pathlib import Path
 try:
     import torch
     import torch.nn.functional as F
@@ -379,15 +381,20 @@ def calc_loc(
 
 
 def initialize_eikonal(config):
-    if {'up', 'us', 'rgrid', 'zgrid', 'h'} <= set(config.keys()):
-        config['up'] = torch.load(config['up'])
-        config['us'] = torch.load(config['us'])
-        config['rgrid'] = torch.load(config['rgrid'])
-        config['zgrid'] = torch.load(config['zgrid'])
+    path = Path('./eikonal')
+    path.mkdir(exist_ok=True)
+    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
+    zlim = config["zlim"]
+    h = config["h"]
+    
+    f = '_'.join([str(x) for x in [int(rlim[0]), int(rlim[1]), int(zlim[0]), int(zlim[1]), config['h']]])
+    if (path / (f+'.dir')).is_file():
+        with shelve.open(str(path / f)) as e:
+            up = e['up']
+            us = e['us']
+            rgrid = e['rgrid']
+            zgrid = e['zgrid']
     else:
-        rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
-        zlim = config["zlim"]
-        h = config["h"]
         edge_grids = 3
 
         rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
@@ -414,13 +421,14 @@ def initialize_eikonal(config):
         rgrid = torch.tensor(rgrid, dtype=torch.float32)
         zgrid = torch.tensor(zgrid, dtype=torch.float32)
         rgrid, zgrid = torch.meshgrid(rgrid, zgrid, indexing="ij")
-        if config['save']:
-            torch.save(up, 'up.pt')
-            torch.save(us, 'us.pt')
-            torch.save(rgrid, 'rgrid.pt')
-            torch.save(zgrid, 'zgrid.pt')
+        with shelve.open(str(path / f)) as e:
+            e['up'] = up
+            e['us'] = us
+            e['rgrid'] = rgrid
+            e['zgrid'] = zgrid
 
-        config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
+    
+    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
 
     return config
 
