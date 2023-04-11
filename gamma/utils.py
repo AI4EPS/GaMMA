@@ -81,6 +81,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
         events, assignment = associate(
             list(unique_labels)[0],
+            labels,
             data,
             locs,
             phase_type,
