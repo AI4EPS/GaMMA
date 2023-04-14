@@ -323,9 +323,9 @@ def associate(
             "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
             "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
             "gamma_score": prob_eq[i],
-            "number_picks": len(tmp_data[idx_filter]),
-            "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
-            "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
+            "num_picks": len(tmp_data[idx_filter]),
+            "num_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
+            "num_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
             "event_index": event_idx_value,
         }
         for j, k in enumerate(config["dims"]):  ## add location
