@@ -83,16 +83,19 @@ def eikonal_solve(u, f, h):
 
 
 def _interp(time_table, r, z, rgrid, zgrid, h):
-    ir0 = (r - rgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, rgrid.shape[0] - 2).long()
-    iz0 = (z - zgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, zgrid.shape[1] - 2).long()
+    rgrid00 = rgrid[0, 0]
+    zgrid00 = zgrid[0, 0]
+
+    ir0 = (r - rgrid00).div(h, rounding_mode='floor').clamp(0, rgrid.shape[0] - 2).long()
+    iz0 = (z - zgrid00).div(h, rounding_mode='floor').clamp(0, zgrid.shape[1] - 2).long()
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
     ## https://en.wikipedia.org/wiki/Bilinear_interpolation
-    x1 = ir0 * h + rgrid[0, 0]
-    x2 = ir1 * h + rgrid[0, 0]
-    y1 = iz0 * h + zgrid[0, 0]
-    y2 = iz1 * h + zgrid[0, 0]
+    x1 = ir0 * h + rgrid00
+    x2 = ir1 * h + rgrid00
+    y1 = iz0 * h + zgrid00
+    y2 = iz1 * h + zgrid00
 
     Q11 = time_table[ir0, iz0]
     Q12 = time_table[ir0, iz1]
@@ -381,8 +384,10 @@ def calc_loc(
 def initialize_eikonal(config):
     rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
     zlim = config["zlim"]
-    h = config["h"]
     edge_grids = 3
+    # zlim = [0, config["zlim"][1] - config["zlim"][0]]
+    # edge_grids = 0
+    h = config["h"]
 
     rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
     zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
