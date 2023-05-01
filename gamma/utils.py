@@ -353,7 +353,10 @@ def init_centers(config, data_, locs_, time_range):
 
     x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0] + 2)[1:-1]
     y_init = np.linspace(config["y(km)"][0], config["y(km)"][1], initial_points[1] + 2)[1:-1]
-    z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
+    if initial_points[2] == 1:
+        z_init = np.average(config["z(km)"])
+    else:   
+        z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
     x_init = np.broadcast_to(x_init[:, np.newaxis, np.newaxis], initial_points).reshape(-1)
     y_init = np.broadcast_to(y_init[np.newaxis, :, np.newaxis], initial_points).reshape(-1)
     z_init = np.broadcast_to(z_init[np.newaxis, np.newaxis, :], initial_points).reshape(-1)
