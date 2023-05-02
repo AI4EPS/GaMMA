@@ -8,7 +8,14 @@ figures
 
 docs/test_data.zip*
 docs/test_data
+dist/*
 tests/test_data.zip*
 tests/test_data
+gamma/eikonal.py
+gamma/test_eikonal.py
+gamma/seismic_ops_np.py
+gamma/test.py
 
+up.csv
+us.csv
 build/
