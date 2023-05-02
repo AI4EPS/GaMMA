@@ -10,5 +10,10 @@ docs/test_data.zip*
 docs/test_data
 tests/test_data.zip*
 tests/test_data
+dist/*
+
+gamma/test.py
+gamma/test_eikonal.py
+gamma/seismic_ops_np.py
 
 build/
