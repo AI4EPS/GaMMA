@@ -3,12 +3,6 @@ import numpy as np
 import scipy.optimize
 import shelve
 from pathlib import Path
-try:
-    import torch
-    import torch.nn.functional as F
-    import torch.optim
-except:
-    pass
 
 
 ###################################### Eikonal Solver ######################################
@@ -81,12 +75,68 @@ def eikonal_solve(u, f, h):
     return u
 
 
+def initialize_eikonal(config):
+    path = Path('./eikonal')
+    path.mkdir(exist_ok=True)
+    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
+    zlim = config["zlim"]
+    h = config["h"]
+    
+    f = '_'.join([str(x) for x in [int(rlim[0]), int(rlim[1]), int(zlim[0]), int(zlim[1]), config['h']]])
+    if (path / (f+'.dir')).is_file():
+        with shelve.open(str(path / f)) as e:
+            up = e['up']
+            us = e['us']
+            rgrid = e['rgrid']
+            zgrid = e['zgrid']
+    else:
+        edge_grids = 3
+
+        rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
+        zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
+        m, n = len(rgrid), len(zgrid)
+
+        vel = config["vel"]
+        zz, vp, vs = vel["z"], vel["p"], vel["s"]
+        vp1d = np.interp(zgrid, zz, vp)
+        vs1d = np.interp(zgrid, zz, vs)
+        vp = np.ones((m, n)) * vp1d
+        vs = np.ones((m, n)) * vs1d
+
+        up = 1000 * np.ones((m, n))
+        up[edge_grids, edge_grids] = 0.0
+        up = eikonal_solve(up, vp, h)
+
+        us = 1000 * np.ones((m, n))
+        us[edge_grids, edge_grids] = 0.0
+        us = eikonal_solve(us, vs, h)
+
+        rgrid, zgrid = np.meshgrid(rgrid, zgrid, indexing="ij")
+        with shelve.open(str(path / f)) as e:
+            e['up'] = up
+            e['us'] = us
+            e['rgrid'] = rgrid
+            e['zgrid'] = zgrid
+
+    
+    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
+
+    return config
+
+
 ###################################### Traveltime based on Eikonal Timetable ######################################
+def get_values_from_table(ir0, iz0, time_table):
+    v = np.zeros_like(ir0, dtype=np.float64)
+    for i in range(ir0.shape[0]):
+        r = ir0[i, 0]
+        z = iz0[i, 0]
+        v[i, 0] = time_table[r, z]
+    return v
 
 
 def _interp(time_table, r, z, rgrid, zgrid, h):
-    ir0 = (r - rgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, rgrid.shape[0] - 2).long()
-    iz0 = (z - zgrid[0, 0]).div(h, rounding_mode='floor').clamp(0, zgrid.shape[1] - 2).long()
+    ir0 = np.floor((r - rgrid[0, 0]) / h).clip(0, rgrid.shape[0] - 2).astype(np.int64)
+    iz0 = np.floor((z - zgrid[0, 0]) / h).clip(0, zgrid.shape[1] - 2).astype(np.int64)
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
@@ -96,10 +146,10 @@ def _interp(time_table, r, z, rgrid, zgrid, h):
     y1 = iz0 * h + zgrid[0, 0]
     y2 = iz1 * h + zgrid[0, 0]
 
-    Q11 = time_table[ir0, iz0]
-    Q12 = time_table[ir0, iz1]
-    Q21 = time_table[ir1, iz0]
-    Q22 = time_table[ir1, iz1]
+    Q11 = get_values_from_table(ir0, iz0, time_table)
+    Q12 = get_values_from_table(ir0, iz1, time_table)
+    Q21 = get_values_from_table(ir1, iz0, time_table)
+    Q22 = get_values_from_table(ir1, iz1, time_table)
 
     t = (
         1
@@ -117,7 +167,7 @@ def _interp(time_table, r, z, rgrid, zgrid, h):
 
 
 def traveltime(event_loc, station_loc, time_table, rgrid, zgrid, h, **kwargs):
-    r = torch.sqrt(torch.sum((event_loc[:, :2] - station_loc[:, :2]) ** 2, dim=-1, keepdims=True))
+    r = np.linalg.norm(event_loc[:, :2] - station_loc[:, :2], axis=-1, keepdims=True)
     z = event_loc[:, 2:] - station_loc[:, 2:]
     if (event_loc[:, 2:] < 0).any():
         print(f"Warning: depth is defined as positive down: {event_loc[:, 2:].detach().numpy()}")
@@ -139,12 +189,9 @@ def calc_time(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75
         v = np.array([vel[x] for x in phase_type])[:, np.newaxis]
         tt = np.linalg.norm(ev_loc - station_loc, axis=-1, keepdims=True) / v + ev_t
     else:
-        ev_loc = torch.from_numpy(ev_loc).float()
-        station_locs = torch.from_numpy(station_loc).float()
-
         tp = traveltime(
             ev_loc,
-            station_locs[phase_type == "p"],
+            station_loc[phase_type == "p"],
             eikonal["up"],
             eikonal["rgrid"],
             eikonal["zgrid"],
@@ -153,7 +200,7 @@ def calc_time(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75
         )
         ts = traveltime(
             ev_loc,
-            station_locs[phase_type == "s"],
+            station_loc[phase_type == "s"],
             eikonal["us"],
             eikonal["rgrid"],
             eikonal["zgrid"],
@@ -162,8 +209,8 @@ def calc_time(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75
         )
 
         tt = np.zeros(len(phase_type), dtype=np.float32)[:, np.newaxis]
-        tt[phase_type == "p"] = tp.numpy()
-        tt[phase_type == "s"] = ts.numpy()
+        tt[phase_type == "p"] = tp
+        tt[phase_type == "s"] = ts
         tt = tt + ev_t
 
     return tt
@@ -201,139 +248,29 @@ def calc_amp(mag, event_loc, station_loc):
     return logA
 
 
+################################################ Location ################################################
 ## Huber loss
-def loss_and_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"p": 6.0, "s": 6.0 / 1.75}, sigma=1):
-    v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
+def huber_loss_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"p": 6.0, "s": 6.0 / 1.75}, sigma=1, eikonal=None):
     event_loc = event_loc[np.newaxis, :]
+    predict_time = calc_time(event_loc, station_loc, phase_type, vel, eikonal)
+    v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
     dist = np.sqrt(np.sum((station_loc - event_loc[:, :-1]) ** 2, axis=1, keepdims=True))
+    # predict_time = dist / v + event_loc[:, -1:]
+    t_diff = predict_time - phase_time
+    
     J = np.zeros([phase_time.shape[0], event_loc.shape[1]])
     J[:, :-1] = (event_loc[:, :-1] - station_loc) / (dist + 1e-6) / v
     J[:, -1] = 1
 
-    y = dist / v - (phase_time - event_loc[:, -1:])
+    l1 = np.squeeze((np.abs(t_diff) > sigma))
+    l2 = np.squeeze((np.abs(t_diff) <= sigma))
 
-    # std = np.sqrt(np.sum(y**2 * weight) / (np.sum(weight)+1e-12))
-    # mask = (np.abs(y) <= 2*std)
-    # l1 = np.squeeze((np.abs(y) > sigma) & mask)
-    # l2 = np.squeeze((np.abs(y) <= sigma) & mask)
-
-    l1 = np.squeeze((np.abs(y) > sigma))
-    l2 = np.squeeze((np.abs(y) <= sigma))
-
-    loss = np.sum((sigma * np.abs(y[l1]) - 0.5 * sigma**2) * weight[l1]) + np.sum(0.5 * y[l2] ** 2 * weight[l2])
-    J_ = np.sum(sigma * np.sign(y[l1]) * J[l1] * weight[l1], axis=0, keepdims=True) + np.sum(
-        y[l2] * J[l2] * weight[l2], axis=0, keepdims=True
+    loss = np.sum((sigma * np.abs(t_diff[l1]) - 0.5 * sigma**2) * weight[l1]) + np.sum(0.5 * t_diff[l2] ** 2 * weight[l2])
+    J_ = np.sum(sigma * np.sign(t_diff[l1]) * J[l1] * weight[l1], axis=0, keepdims=True) + np.sum(
+        t_diff[l2] * J[l2] * weight[l2], axis=0, keepdims=True
     )
 
     return loss, J_
-
-
-def linloc(
-    event_loc0,
-    phase_time,
-    phase_type,
-    station_loc,
-    weight,
-    max_iter=10,
-    convergence=1e-3,
-    bounds=None,
-    vel={"p": 6.0, "s": 6.0 / 1.75},
-):
-    opt = scipy.optimize.minimize(
-        loss_and_grad,
-        np.squeeze(event_loc0),
-        method="L-BFGS-B",
-        jac=True,
-        args=(phase_time, phase_type, station_loc, weight, vel, 1),
-        bounds=bounds,
-        options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
-    )
-
-    return opt.x[np.newaxis, :], opt.fun
-
-
-def eikoloc(
-    event_loc0,
-    phase_time,
-    phase_type,
-    station_loc,
-    weight,
-    up,
-    us,
-    rgrid,
-    zgrid,
-    h,
-    bounds=None,
-    device="cpu",
-    add_eqt=False,
-    gamma=0.1,
-    max_iter=1000,
-    convergence=1e-9,
-):
-    event_loc = torch.tensor(event_loc0, dtype=torch.float32, requires_grad=True, device=device)
-    if bounds is not None:
-        bounds = torch.tensor(bounds, dtype=torch.float32, device=device)
-    p_index = torch.arange(len(phase_type), device=device)[phase_type == "p"]
-    s_index = torch.arange(len(phase_type), device=device)[phase_type == "s"]
-    time = torch.tensor(phase_time, dtype=torch.float32, device=device)
-    loc = torch.tensor(station_loc, dtype=torch.float32, device=device)
-    weight = torch.tensor(weight, dtype=torch.float32, device=device)
-    obs_p = time[p_index]
-    obs_s = time[s_index]
-    loc_p = loc[p_index]
-    loc_s = loc[s_index]
-    weight_p = weight[p_index]
-    weight_s = weight[s_index]
-
-    # %% optimization
-    optimizer = torch.optim.LBFGS(params=[event_loc], max_iter=max_iter, line_search_fn="strong_wolfe", tolerance_change=convergence)
-
-    def closure():
-        optimizer.zero_grad()
-        if bounds is not None:
-            loc0_ = torch.max(torch.min(event_loc[:, :-1], bounds[:, 1]), bounds[:, 0])
-        else:
-            loc0_ = event_loc[:, :-1]
-        loc0_ = torch.nan_to_num(loc0_, nan=0)
-        t0_ = event_loc[:, -1:]
-        if len(p_index) > 0:
-            tt_p = traveltime(loc0_, loc_p, up, rgrid, zgrid, h, sigma=1)
-            pred_p = t0_ + tt_p
-            loss_p = torch.mean(F.huber_loss(obs_p, pred_p, reduction="none") * weight_p)
-            if add_eqt:
-                dd_tt_p = tt_p.unsqueeze(-1) - tt_p.unsqueeze(-2)
-                dd_time_p = obs_p.unsqueeze(-1) - obs_p.unsqueeze(-2)
-                loss_p += gamma * torch.mean(
-                    F.huber_loss(dd_tt_p, dd_time_p, reduction="none") * weight_p.unsqueeze(-1) * weight_p.unsqueeze(-2)
-                )
-            # loss_p = F.mse_loss(time_p, tt_p)
-        else:
-            loss_p = 0
-        if len(s_index) > 0:
-            tt_s = traveltime(loc0_, loc_s, us, rgrid, zgrid, h, sigma=1)
-            pred_s = t0_ + tt_s
-            loss_s = torch.mean(F.huber_loss(obs_s, pred_s, reduction="none") * weight_s)
-            if add_eqt:
-                dd_tt_s = tt_s.unsqueeze(-1) - tt_s.unsqueeze(-2)
-                dd_time_s = obs_s.unsqueeze(-1) - obs_s.unsqueeze(-2)
-                loss_s += gamma * torch.mean(
-                    F.huber_loss(dd_tt_s, dd_time_s, reduction="none") * weight_s.unsqueeze(-1) * weight_s.unsqueeze(-2)
-                )
-            # loss_s = F.mse_loss(time_s, tt_s)
-        else:
-            loss_s = 0
-        loss = loss_p + loss_s
-        loss.backward()
-        return loss
-
-    optimizer.step(closure)
-    loss = closure().item()
-
-    event_loc = event_loc.detach().cpu()
-    if bounds is not None:
-        event_loc[:, :-1] = torch.max(torch.min(event_loc[:, :-1], bounds[:, 1]), bounds[:, 0])
-
-    return event_loc, loss
 
 
 def calc_loc(
@@ -347,90 +284,19 @@ def calc_loc(
     bounds=None,
     max_iter=100,
     convergence=1e-6,
-):
-    if eikonal is None:
-        event_loc, loss = linloc(
-            event_loc0,
-            phase_time,
-            phase_type,
-            station_loc,
-            weight,
-            vel=vel,
-            bounds=bounds,
-            max_iter=max_iter,
-            convergence=convergence,
-        )
-    else:
-        event_loc, loss = eikoloc(
-            event_loc0,
-            phase_time,
-            phase_type,
-            station_loc,
-            weight,
-            up=eikonal["up"],
-            us=eikonal["us"],
-            rgrid=eikonal["rgrid"],
-            zgrid=eikonal["zgrid"],
-            h=eikonal["h"],
-            bounds=bounds[:-1],
-            max_iter=max_iter,
-            convergence=convergence,
-        )
+): 
+    predict_time = calc_time(event_loc0, station_loc, phase_type, vel, eikonal)
+    opt = scipy.optimize.minimize(
+        huber_loss_grad,
+        np.squeeze(event_loc0),
+        method="L-BFGS-B",
+        jac=True,
+        args=(phase_time, phase_type, station_loc, weight, vel, 1, eikonal),
+        bounds=bounds,
+        options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
+    )
 
-    return event_loc, loss
-
-
-def initialize_eikonal(config):
-    path = Path('./eikonal')
-    path.mkdir(exist_ok=True)
-    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
-    zlim = config["zlim"]
-    h = config["h"]
-    
-    f = '_'.join([str(x) for x in [int(rlim[0]), int(rlim[1]), int(zlim[0]), int(zlim[1]), config['h']]])
-    if (path / (f+'.dir')).is_file():
-        with shelve.open(str(path / f)) as e:
-            up = e['up']
-            us = e['us']
-            rgrid = e['rgrid']
-            zgrid = e['zgrid']
-    else:
-        edge_grids = 3
-
-        rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
-        zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
-        m, n = len(rgrid), len(zgrid)
-
-        vel = config["vel"]
-        zz, vp, vs = vel["z"], vel["p"], vel["s"]
-        vp1d = np.interp(zgrid, zz, vp)
-        vs1d = np.interp(zgrid, zz, vs)
-        vp = np.ones((m, n)) * vp1d
-        vs = np.ones((m, n)) * vs1d
-
-        up = 1000 * np.ones((m, n))
-        up[edge_grids, edge_grids] = 0.0
-        up = eikonal_solve(up, vp, h)
-
-        us = 1000 * np.ones((m, n))
-        us[edge_grids, edge_grids] = 0.0
-        us = eikonal_solve(us, vs, h)
-
-        up = torch.tensor(up, dtype=torch.float32)
-        us = torch.tensor(us, dtype=torch.float32)
-        rgrid = torch.tensor(rgrid, dtype=torch.float32)
-        zgrid = torch.tensor(zgrid, dtype=torch.float32)
-        rgrid, zgrid = torch.meshgrid(rgrid, zgrid, indexing="ij")
-        with shelve.open(str(path / f)) as e:
-            e['up'] = up
-            e['us'] = us
-            e['rgrid'] = rgrid
-            e['zgrid'] = zgrid
-
-    
-    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
-
-    return config
+    return opt.x[np.newaxis, :], opt.fun
 
 
 def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
