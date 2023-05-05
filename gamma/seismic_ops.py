@@ -89,6 +89,10 @@ def initialize_eikonal(config):
             us = e['us']
             rgrid = e['rgrid']
             zgrid = e['zgrid']
+            dp_r = e['dp_r']
+            ds_r = e['ds_r']
+            dp_z = e['dp_z']
+            ds_z = e['ds_z']
     else:
         edge_grids = 3
 
@@ -111,12 +115,32 @@ def initialize_eikonal(config):
         us[edge_grids, edge_grids] = 0.0
         us = eikonal_solve(us, vs, h)
 
+        dp_r = (np.append(up, 2*up[-1:, :]-up[-2:-1, :], axis=0)[1:, :] 
+                -
+                np.insert(up, [0], 2*up[0:1, :]-up[1:2, :], axis = 0)[:-1, :]) / (2*h) 
+        
+        ds_r = (np.append(us, 2*us[-1:, :]-us[-2:-1, :], axis=0)[1:, :] 
+                -
+                np.insert(us, [0], 2*us[0:1, :]-us[1:2, :], axis = 0)[:-1, :]) / (2*h) 
+        
+        dp_z = (np.append(up, 2*up[:, -1:]-up[:, -2:-1], axis=1)[:, 1:]
+                -
+                np.insert(up, [0], 2*up[:, 0:1]-up[:, 1:2], axis = 1)[:, :-1]) / (2*h)
+        
+        ds_z = (np.append(us, 2*us[:, -1:]-us[:, -2:-1], axis=1)[:, 1:]
+                -
+                np.insert(us, [0], 2*us[:, 0:1]-us[:, 1:2], axis = 1)[:, :-1]) / (2*h)
+
         rgrid, zgrid = np.meshgrid(rgrid, zgrid, indexing="ij")
         with shelve.open(str(path / f)) as e:
             e['up'] = up
             e['us'] = us
             e['rgrid'] = rgrid
             e['zgrid'] = zgrid
+            e['dp_r'] = dp_r
+            e['ds_r'] = ds_r
+            e['dp_z'] = dp_z
+            e['ds_z'] = ds_z
 
     
     config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
@@ -249,23 +273,65 @@ def calc_amp(mag, event_loc, station_loc):
 
 
 ################################################ Location ################################################
-## Huber loss
+def calc_tx(r, z, phase_type, eikonal):
+    t_x = np.zeros(phase_type.shape[0], 3)
+    t_r_p = _interp(eikonal['dp_r'],
+                    r[phase_type == 'p'], 
+                    z[phase_type == 'p'], 
+                    eikonal['rgrid'], 
+                    eikonal['zgrid'], 
+                    eikonal['h'])
+    t_z_p = _interp(eikonal['dp_z'],
+                    r[phase_type == 'p'], 
+                    z[phase_type == 'p'], 
+                    eikonal['rgrid'], 
+                    eikonal['zgrid'], 
+                    eikonal['h'])
+    t_r_s = _interp(eikonal['ds_r'],
+                    r[phase_type == 's'], 
+                    z[phase_type == 's'], 
+                    eikonal['rgrid'], 
+                    eikonal['zgrid'], 
+                    eikonal['h'])
+    t_z_s = _interp(eikonal['ds_z'],
+                    r[phase_type == 's'], 
+                    z[phase_type == 's'], 
+                    eikonal['rgrid'], 
+                    eikonal['zgrid'], 
+                    eikonal['h'])
+    
+    t_x[phase_type == "p"] = np.column_stack([t_r_p, t_r_p, t_z_p])
+    t_x[phase_type == "s"] = np.column_stack([t_r_s, t_r_s, t_z_s])
+    
+    return t_x
+
+
 def huber_loss_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"p": 6.0, "s": 6.0 / 1.75}, sigma=1, eikonal=None):
     event_loc = event_loc[np.newaxis, :]
     predict_time = calc_time(event_loc, station_loc, phase_type, vel, eikonal)
-    v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
-    dist = np.sqrt(np.sum((station_loc - event_loc[:, :-1]) ** 2, axis=1, keepdims=True))
-    # predict_time = dist / v + event_loc[:, -1:]
     t_diff = predict_time - phase_time
     
-    J = np.zeros([phase_time.shape[0], event_loc.shape[1]])
-    J[:, :-1] = (event_loc[:, :-1] - station_loc) / (dist + 1e-6) / v
-    J[:, -1] = 1
-
     l1 = np.squeeze((np.abs(t_diff) > sigma))
     l2 = np.squeeze((np.abs(t_diff) <= sigma))
 
+    # loss
     loss = np.sum((sigma * np.abs(t_diff[l1]) - 0.5 * sigma**2) * weight[l1]) + np.sum(0.5 * t_diff[l2] ** 2 * weight[l2])
+    J = np.zeros([phase_time.shape[0], event_loc.shape[1]])
+
+    # gradient
+    if eikonal is None:
+        v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
+        dist = np.sqrt(np.sum((station_loc - event_loc[:, :-1]) ** 2, axis=1, keepdims=True))
+        J[:, :-1] = (event_loc[:, :-1] - station_loc) / (dist + 1e-6) / v
+    else:
+        r = np.sqrt(np.sum((station_loc[:, :-1] - event_loc[:, :-2]) ** 2, axis=1, keepdims=True))
+        z = station_loc[:, -1:] - event_loc[:, -2:-1]
+        r_x = np.column_stack([(station_loc[:, :-1] - event_loc[:, :-2]) / (r + 1e-6), 
+                               np.ones_like(station_loc[:, 0:1])])
+        t_r = calc_tx(r, z, phase_type, eikonal)
+        J[:, :-1] = r_x * t_r
+    J[:, -1] = 1
+
     J_ = np.sum(sigma * np.sign(t_diff[l1]) * J[l1] * weight[l1], axis=0, keepdims=True) + np.sum(
         t_diff[l2] * J[l2] * weight[l2], axis=0, keepdims=True
     )
@@ -285,7 +351,6 @@ def calc_loc(
     max_iter=100,
     convergence=1e-6,
 ): 
-    predict_time = calc_time(event_loc0, station_loc, phase_type, vel, eikonal)
     opt = scipy.optimize.minimize(
         huber_loss_grad,
         np.squeeze(event_loc0),
