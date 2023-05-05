@@ -143,7 +143,7 @@ def initialize_eikonal(config):
             e['ds_z'] = ds_z
 
     
-    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h})
+    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h, "dp_r": dp_r, "ds_r": ds_r, "dp_z": dp_z, "ds_z": ds_z})
 
     return config
 
@@ -273,8 +273,8 @@ def calc_amp(mag, event_loc, station_loc):
 
 
 ################################################ Location ################################################
-def calc_tx(r, z, phase_type, eikonal):
-    t_x = np.zeros(phase_type.shape[0], 3)
+def calc_td(r, z, phase_type, eikonal):
+    t_d = np.zeros([phase_type.shape[0], 3])
     t_r_p = _interp(eikonal['dp_r'],
                     r[phase_type == 'p'], 
                     z[phase_type == 'p'], 
@@ -300,10 +300,10 @@ def calc_tx(r, z, phase_type, eikonal):
                     eikonal['zgrid'], 
                     eikonal['h'])
     
-    t_x[phase_type == "p"] = np.column_stack([t_r_p, t_r_p, t_z_p])
-    t_x[phase_type == "s"] = np.column_stack([t_r_s, t_r_s, t_z_s])
+    t_d[phase_type == "p"] = np.column_stack([t_r_p, t_r_p, t_z_p])
+    t_d[phase_type == "s"] = np.column_stack([t_r_s, t_r_s, t_z_s])
     
-    return t_x
+    return t_d
 
 
 def huber_loss_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"p": 6.0, "s": 6.0 / 1.75}, sigma=1, eikonal=None):
@@ -326,10 +326,10 @@ def huber_loss_grad(event_loc, phase_time, phase_type, station_loc, weight, vel=
     else:
         r = np.sqrt(np.sum((station_loc[:, :-1] - event_loc[:, :-2]) ** 2, axis=1, keepdims=True))
         z = station_loc[:, -1:] - event_loc[:, -2:-1]
-        r_x = np.column_stack([(station_loc[:, :-1] - event_loc[:, :-2]) / (r + 1e-6), 
+        d_x = np.column_stack([(station_loc[:, :-1] - event_loc[:, :-2]) / (r + 1e-6), 
                                np.ones_like(station_loc[:, 0:1])])
-        t_r = calc_tx(r, z, phase_type, eikonal)
-        J[:, :-1] = r_x * t_r
+        t_d = calc_td(r, z, phase_type, eikonal)
+        J[:, :-1] = d_x * t_d
     J[:, -1] = 1
 
     J_ = np.sum(sigma * np.sign(t_diff[l1]) * J[l1] * weight[l1], axis=0, keepdims=True) + np.sum(
