@@ -167,13 +167,15 @@ def associate(
     pick_idx_=pick_idx[labels==k]
     pick_station_id_=pick_station_id[labels==k]
 
+    max_num_event = max(Counter(pick_station_id_).values())
+
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
         return [], []
 
     time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
-    ## initialization with 5 horizontal points and N//5 time points
-    centers_init = init_centers(config, data_, locs_, time_range)
+    ## initialization with [1,1,1] horizontal points and N time points
+    centers_init = init_centers(config, data_, locs_, time_range, max_num_event)
 
     ## run clustering
     mean_precision_prior = 0.01 / time_range
@@ -340,7 +342,11 @@ def associate(
     return events, assignment
 
 
-def init_centers(config, data_, locs_, time_range):
+def init_centers(config, data_, locs_, time_range, max_num_event=1):
+    """
+    max_num_event: maximum number of events at one station
+    """
+
     if "initial_points" in config:
         initial_points = config["initial_points"]
         if not isinstance(initial_points, list):
@@ -348,7 +354,7 @@ def init_centers(config, data_, locs_, time_range):
     else:
         initial_points = [1, 1, 1]
 
-    if ((np.prod(initial_points) + 1) * config["oversample_factor"]) > len(data_):
+    if (np.prod(initial_points) * max_num_event * config["oversample_factor"]) > len(data_):
         initial_points = [1, 1, 1]
 
     x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0] + 2)[1:-1]
@@ -366,9 +372,10 @@ def init_centers(config, data_, locs_, time_range):
         z_init = np.append(z_init, 0)
     num_xyz_init = len(x_init)
 
-    num_sta = len(np.unique(locs_, axis=0))
-    num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
-    num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
+    # num_sta = len(np.unique(locs_, axis=0))
+    # num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
+    # num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
+    num_t_init = min(max_num_event * config["oversample_factor"], max(len(data_) // num_xyz_init, 1))
     t_init = np.sort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
     # t_init = np.linspace(
     #         data_[:, 0].min() - 0.1 * time_range,
