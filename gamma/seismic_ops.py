@@ -3,13 +3,14 @@ import numpy as np
 import scipy.optimize
 import shelve
 from pathlib import Path
+from numba import jit
 
 
 ###################################### Eikonal Solver ######################################
 # |\nabla u| = f
 # ((u - a1)^+)^2 + ((u - a2)^+)^2 + ((u - a3)^+)^2 = f^2 h^2
 
-
+@jit
 def calculate_unique_solution(a, b, f, h):
     d = abs(a - b)
     if d >= f * h:
@@ -149,6 +150,7 @@ def initialize_eikonal(config):
 
 
 ###################################### Traveltime based on Eikonal Timetable ######################################
+@jit
 def get_values_from_table(ir0, iz0, time_table):
     v = np.zeros_like(ir0, dtype=np.float64)
     for i in range(ir0.shape[0]):
@@ -158,6 +160,7 @@ def get_values_from_table(ir0, iz0, time_table):
     return v
 
 
+@jit
 def _interp(time_table, r, z, rgrid, zgrid, h):
     ir0 = np.floor((r - rgrid[0, 0]) / h).clip(0, rgrid.shape[0] - 2).astype(np.int64)
     iz0 = np.floor((z - zgrid[0, 0]) / h).clip(0, zgrid.shape[1] - 2).astype(np.int64)
@@ -321,12 +324,12 @@ def huber_loss_grad(event_loc, phase_time, phase_type, station_loc, weight, vel=
     # gradient
     if eikonal is None:
         v = np.array([vel[p] for p in phase_type])[:, np.newaxis]
-        dist = np.sqrt(np.sum((station_loc - event_loc[:, :-1]) ** 2, axis=1, keepdims=True))
+        dist = np.linalg.norm(event_loc[:, :-1] - station_loc, axis=-1, keepdims=True)
         J[:, :-1] = (event_loc[:, :-1] - station_loc) / (dist + 1e-6) / v
     else:
-        r = np.sqrt(np.sum((station_loc[:, :-1] - event_loc[:, :-2]) ** 2, axis=1, keepdims=True))
-        z = station_loc[:, -1:] - event_loc[:, -2:-1]
-        d_x = np.column_stack([(station_loc[:, :-1] - event_loc[:, :-2]) / (r + 1e-6), 
+        r = np.linalg.norm(event_loc[:, :-2] - station_loc[:, :-1], axis=-1, keepdims=True)
+        z = event_loc[:, -2:-1] - station_loc[:, -1:]
+        d_x = np.column_stack([(event_loc[:, :-2] - station_loc[:, :-1]) / (r + 1e-6), 
                                np.ones_like(station_loc[:, 0:1])])
         t_d = calc_td(r, z, phase_type, eikonal)
         J[:, :-1] = d_x * t_d
@@ -350,18 +353,31 @@ def calc_loc(
     bounds=None,
     max_iter=100,
     convergence=1e-6,
+    depth_slice=1
 ): 
-    opt = scipy.optimize.minimize(
-        huber_loss_grad,
-        np.squeeze(event_loc0),
-        method="L-BFGS-B",
-        jac=True,
-        args=(phase_time, phase_type, station_loc, weight, vel, 1, eikonal),
-        bounds=bounds,
-        options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
-    )
+    if bounds != None:
+        depths = np.linspace(bounds[2][0], bounds[2][1], depth_slice+1)
+        depths = [(depths[i], depths[i+1]) for i in range(len(depths)-1)]
+    
+    losses = np.zeros(depth_slice)
+    locs = np.zeros([depth_slice, event_loc0.shape[1]])
+    for i in range(len(depths)):
+        bounds = (bounds[0], bounds[1], depths[i], bounds[3])
+        opt = scipy.optimize.minimize(
+            huber_loss_grad,
+            np.squeeze(event_loc0),
+            method="L-BFGS-B",
+            jac=True,
+            args=(phase_time, phase_type, station_loc, weight, vel, 1, eikonal),
+            bounds=bounds,
+            options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
+        )
+        losses[i] = opt.fun
+        locs[i, :] = opt.x[np.newaxis, :]
 
-    return opt.x[np.newaxis, :], opt.fun
+    minindex = np.argmin(losses)
+
+    return locs[minindex][np.newaxis, :], losses[minindex]
 
 
 def initialize_centers(X, phase_type, centers_init, station_locs, random_state):

@@ -256,7 +256,7 @@ def _estimate_gaussian_covariances_spherical(resp, X, nk, means, reg_covar):
 
 
 def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_locs, phase_type, 
-                                  vel={"p":6.0, "s":6.0/1.75}, loss_type="l2", centers_prev=None, bounds=None, eikonal=None):
+                                  vel={"p":6.0, "s":6.0/1.75}, loss_type="l2", centers_prev=None, bounds=None, eikonal=None, depth_slice=1):
     """Estimate the Gaussian distribution parameters.
 
     Parameters
@@ -298,10 +298,10 @@ def _estimate_gaussian_parameters(X, resp, reg_covar, covariance_type, station_l
     
     for i in range(len(centers_prev)):
         if n_features == 1:
-            loc, loss = calc_loc(X[:,:1], phase_type, station_locs, resp[:, i:i+1], centers_prev[i:i+1, :], vel=vel, bounds=bounds, eikonal=eikonal)
+            loc, loss = calc_loc(X[:,:1], phase_type, station_locs, resp[:, i:i+1], centers_prev[i:i+1, :], vel=vel, bounds=bounds, eikonal=eikonal, depth_slice=depth_slice)
             centers[i:i+1, :] = loc
         elif n_features == 2:
-            loc, loss = calc_loc(X[:,:1], phase_type, station_locs, resp[:, i:i+1], centers_prev[i:i+1, :-1], vel=vel, bounds=bounds, eikonal=eikonal)
+            loc, loss = calc_loc(X[:,:1], phase_type, station_locs, resp[:, i:i+1], centers_prev[i:i+1, :-1], vel=vel, bounds=bounds, eikonal=eikonal, depth_slice=depth_slice)
             centers[i:i+1, :-1] = loc
             centers[i:i+1, -1:] = calc_mag(X[:,1:2], centers[i:i+1,:-1], station_locs, resp[:,i:i+1])
         else:
@@ -656,7 +656,7 @@ class GaussianMixture(BaseMixture):
                  weights_init=None, means_init=None, precisions_init=None, centers_init=None,
                  random_state=None, warm_start=False, 
                  station_locs=None, phase_type=None, phase_weight=None, 
-                 vel={"p":6.0, "s":6.0/1.75}, eikonal=None,
+                 vel={"p":6.0, "s":6.0/1.75}, eikonal=None, depth_slice=1,
                  dummy_comp=False, dummy_prob=0.01, dummy_quantile=0.1,
                  loss_type="l1", bounds=None, max_covar=None,
                  verbose=0, verbose_interval=10):
@@ -686,6 +686,7 @@ class GaussianMixture(BaseMixture):
         self.bounds = bounds
         self.max_covar = max_covar
         self.eikonal = eikonal
+        self.depth_slice = depth_slice
 
     def _check_parameters(self, X):
         """Check the Gaussian mixture parameters are well defined."""
@@ -737,7 +738,7 @@ class GaussianMixture(BaseMixture):
         weights, means, covariances, centers = _estimate_gaussian_parameters(
             X, resp, self.reg_covar, self.covariance_type, 
             self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
-            centers_prev=self.centers_init, bounds=self.bounds, eikonal=self.eikonal)
+            centers_prev=self.centers_init, bounds=self.bounds, eikonal=self.eikonal, depth_slice=self.depth_slice)
         weights /= n_samples
 
         # self.weights_ = (weights if self.weights_init is None else self.weights_init)
@@ -777,7 +778,7 @@ class GaussianMixture(BaseMixture):
             _estimate_gaussian_parameters(
                 X, np.exp(log_resp), self.reg_covar, self.covariance_type, 
                 self.station_locs, self.phase_type, vel=self.vel, loss_type=self.loss_type, 
-                centers_prev=self.centers_, bounds=self.bounds, eikonal=self.eikonal))
+                centers_prev=self.centers_, bounds=self.bounds, eikonal=self.eikonal, depth_slice=self.depth_slice))
         self.weights_ /= n_samples
         self.precisions_cholesky_ = _compute_precision_cholesky(
             self.covariances_, self.covariance_type, self.max_covar)

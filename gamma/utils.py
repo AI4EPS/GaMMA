@@ -173,7 +173,7 @@ def associate(
     time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
     ## initialization with 5 horizontal points and N//5 time points
-    centers_init = init_centers(config, data_, locs_, time_range)
+    centers_init, depth_slice = init_centers(config, data_, locs_, time_range)
 
     ## run clustering
     mean_precision_prior = 0.01 / time_range
@@ -201,6 +201,7 @@ def associate(
             vel=vel,
             eikonal=config["eikonal"],
             bounds=config["bfgs_bounds"],
+            depth_slice=depth_slice
         ).fit(data_)
     elif method == "GMM":
         gmm = GaussianMixture(
@@ -213,6 +214,7 @@ def associate(
             vel=vel,
             eikonal=config["eikonal"],
             bounds=config["bfgs_bounds"],
+            depth_slice=depth_slice,
             dummy_comp=True,
             dummy_prob=1 / (1 * np.sqrt(2 * np.pi)) * np.exp(-1 / 2),
             dummy_quantile=0.1,
@@ -348,6 +350,9 @@ def init_centers(config, data_, locs_, time_range):
     else:
         initial_points = [1, 1, 1]
 
+    depth_slice = initial_points[2]
+    initial_points[2] = 1
+
     if ((np.prod(initial_points) + 1) * config["oversample_factor"]) > len(data_):
         initial_points = [1, 1, 1]
 
@@ -359,7 +364,7 @@ def init_centers(config, data_, locs_, time_range):
     z_init = np.broadcast_to(z_init[np.newaxis, np.newaxis, :], initial_points).reshape(-1)
 
     ## I found it helpful to add a point at the center of the area
-    if (initial_points[0] == 2) and (initial_points[1] == 2):
+    if (initial_points[0] % 2 == 0) and (initial_points[1] % 2 == 0):
         x_init = np.append(x_init, np.mean(config["x(km)"]))
         y_init = np.append(y_init, np.mean(config["y(km)"]))
         z_init = np.append(z_init, 0)
@@ -412,4 +417,4 @@ def init_centers(config, data_, locs_, time_range):
     # plt.scatter(t_init, z_init)
     # plt.savefig("initial_points_tz.png")
 
-    return centers_init
+    return centers_init, depth_slice
