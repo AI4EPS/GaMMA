@@ -76,7 +76,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     if "ncpu" not in config:
         config["ncpu"] = max(1, min(len(unique_labels)//4, mp.cpu_count() - 1))
 
-    if len(unique_labels) == 1:
+    if (len(unique_labels) == 1) or (config["ncpu"] == 1):
         event_idx = 0
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
         events, assignment = associate(
