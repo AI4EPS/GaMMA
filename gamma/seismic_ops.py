@@ -368,7 +368,7 @@ def calc_loc(
             np.squeeze(event_loc0),
             method="L-BFGS-B",
             jac=True,
-            args=(phase_time, phase_type, station_loc, weight, vel, 1, eikonal),
+            args=(phase_time, phase_type, station_loc, weight, vel, 5, eikonal),
             bounds=bounds,
             options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
         )
