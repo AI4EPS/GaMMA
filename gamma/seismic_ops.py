@@ -76,79 +76,6 @@ def eikonal_solve(u, f, h):
     return u
 
 
-def initialize_eikonal(config):
-    path = Path('./eikonal')
-    path.mkdir(exist_ok=True)
-    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
-    zlim = config["zlim"]
-    h = config["h"]
-    
-    f = '_'.join([str(x) for x in [int(rlim[0]), int(rlim[1]), int(zlim[0]), int(zlim[1]), config['h']]])
-    if (path / (f+'.dir')).is_file():
-        with shelve.open(str(path / f)) as e:
-            up = e['up']
-            us = e['us']
-            rgrid = e['rgrid']
-            zgrid = e['zgrid']
-            dp_r = e['dp_r']
-            ds_r = e['ds_r']
-            dp_z = e['dp_z']
-            ds_z = e['ds_z']
-    else:
-        edge_grids = 3
-
-        rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
-        zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
-        m, n = len(rgrid), len(zgrid)
-
-        vel = config["vel"]
-        zz, vp, vs = vel["z"], vel["p"], vel["s"]
-        vp1d = np.interp(zgrid, zz, vp)
-        vs1d = np.interp(zgrid, zz, vs)
-        vp = np.ones((m, n)) * vp1d
-        vs = np.ones((m, n)) * vs1d
-
-        up = 1000 * np.ones((m, n))
-        up[edge_grids, edge_grids] = 0.0
-        up = eikonal_solve(up, vp, h)
-
-        us = 1000 * np.ones((m, n))
-        us[edge_grids, edge_grids] = 0.0
-        us = eikonal_solve(us, vs, h)
-
-        dp_r = (np.append(up, 2*up[-1:, :]-up[-2:-1, :], axis=0)[1:, :] 
-                -
-                np.insert(up, [0], 2*up[0:1, :]-up[1:2, :], axis = 0)[:-1, :]) / (2*h) 
-        
-        ds_r = (np.append(us, 2*us[-1:, :]-us[-2:-1, :], axis=0)[1:, :] 
-                -
-                np.insert(us, [0], 2*us[0:1, :]-us[1:2, :], axis = 0)[:-1, :]) / (2*h) 
-        
-        dp_z = (np.append(up, 2*up[:, -1:]-up[:, -2:-1], axis=1)[:, 1:]
-                -
-                np.insert(up, [0], 2*up[:, 0:1]-up[:, 1:2], axis = 1)[:, :-1]) / (2*h)
-        
-        ds_z = (np.append(us, 2*us[:, -1:]-us[:, -2:-1], axis=1)[:, 1:]
-                -
-                np.insert(us, [0], 2*us[:, 0:1]-us[:, 1:2], axis = 1)[:, :-1]) / (2*h)
-
-        rgrid, zgrid = np.meshgrid(rgrid, zgrid, indexing="ij")
-        with shelve.open(str(path / f)) as e:
-            e['up'] = up
-            e['us'] = us
-            e['rgrid'] = rgrid
-            e['zgrid'] = zgrid
-            e['dp_r'] = dp_r
-            e['ds_r'] = ds_r
-            e['dp_z'] = dp_z
-            e['ds_z'] = ds_z
-
-    
-    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h, "dp_r": dp_r, "ds_r": ds_r, "dp_z": dp_z, "ds_z": ds_z})
-
-    return config
-
-
 ###################################### Traveltime based on Eikonal Timetable ######################################
 @jit
 def get_values_from_table(ir0, iz0, time_table):
@@ -378,6 +305,79 @@ def calc_loc(
     minindex = np.argmin(losses)
 
     return locs[minindex][np.newaxis, :], losses[minindex]
+
+
+def initialize_eikonal(config):
+    path = Path('./eikonal')
+    path.mkdir(exist_ok=True)
+    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
+    zlim = config["zlim"]
+    h = config["h"]
+    
+    f = '_'.join([str(x) for x in [int(rlim[0]), int(rlim[1]), int(zlim[0]), int(zlim[1]), config['h']]])
+    if (path / (f+'.dir')).is_file():
+        with shelve.open(str(path / f)) as e:
+            up = e['up']
+            us = e['us']
+            rgrid = e['rgrid']
+            zgrid = e['zgrid']
+            dp_r = e['dp_r']
+            ds_r = e['ds_r']
+            dp_z = e['dp_z']
+            ds_z = e['ds_z']
+    else:
+        edge_grids = 3
+
+        rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
+        zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
+        m, n = len(rgrid), len(zgrid)
+
+        vel = config["vel"]
+        zz, vp, vs = vel["z"], vel["p"], vel["s"]
+        vp1d = np.interp(zgrid, zz, vp)
+        vs1d = np.interp(zgrid, zz, vs)
+        vp = np.ones((m, n)) * vp1d
+        vs = np.ones((m, n)) * vs1d
+
+        up = 1000 * np.ones((m, n))
+        up[edge_grids, edge_grids] = 0.0
+        up = eikonal_solve(up, vp, h)
+
+        us = 1000 * np.ones((m, n))
+        us[edge_grids, edge_grids] = 0.0
+        us = eikonal_solve(us, vs, h)
+
+        dp_r = (np.append(up, 2*up[-1:, :]-up[-2:-1, :], axis=0)[1:, :] 
+                -
+                np.insert(up, [0], 2*up[0:1, :]-up[1:2, :], axis = 0)[:-1, :]) / (2*h) 
+        
+        ds_r = (np.append(us, 2*us[-1:, :]-us[-2:-1, :], axis=0)[1:, :] 
+                -
+                np.insert(us, [0], 2*us[0:1, :]-us[1:2, :], axis = 0)[:-1, :]) / (2*h) 
+        
+        dp_z = (np.append(up, 2*up[:, -1:]-up[:, -2:-1], axis=1)[:, 1:]
+                -
+                np.insert(up, [0], 2*up[:, 0:1]-up[:, 1:2], axis = 1)[:, :-1]) / (2*h)
+        
+        ds_z = (np.append(us, 2*us[:, -1:]-us[:, -2:-1], axis=1)[:, 1:]
+                -
+                np.insert(us, [0], 2*us[:, 0:1]-us[:, 1:2], axis = 1)[:, :-1]) / (2*h)
+
+        rgrid, zgrid = np.meshgrid(rgrid, zgrid, indexing="ij")
+        with shelve.open(str(path / f)) as e:
+            e['up'] = up
+            e['us'] = us
+            e['rgrid'] = rgrid
+            e['zgrid'] = zgrid
+            e['dp_r'] = dp_r
+            e['ds_r'] = ds_r
+            e['dp_z'] = dp_z
+            e['ds_z'] = ds_z
+
+    
+    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h, "dp_r": dp_r, "ds_r": ds_r, "dp_z": dp_z, "ds_z": ds_z})
+
+    return config
 
 
 def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
