@@ -89,16 +89,19 @@ def get_values_from_table(ir0, iz0, time_table):
 
 @jit
 def _interp(time_table, r, z, rgrid, zgrid, h):
-    ir0 = np.floor((r - rgrid[0, 0]) / h).clip(0, rgrid.shape[0] - 2).astype(np.int64)
-    iz0 = np.floor((z - zgrid[0, 0]) / h).clip(0, zgrid.shape[1] - 2).astype(np.int64)
+    rgrid00 = rgrid[0, 0]
+    zgrid00 = zgrid[0, 0]
+
+    ir0 = np.floor((r - rgrid00) / h).clip(0, rgrid.shape[0] - 2).astype(np.int64)
+    iz0 = np.floor((z - zgrid00) / h).clip(0, zgrid.shape[1] - 2).astype(np.int64)
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
     ## https://en.wikipedia.org/wiki/Bilinear_interpolation
-    x1 = ir0 * h + rgrid[0, 0]
-    x2 = ir1 * h + rgrid[0, 0]
-    y1 = iz0 * h + zgrid[0, 0]
-    y2 = iz1 * h + zgrid[0, 0]
+    x1 = ir0 * h + rgrid00
+    x2 = ir1 * h + rgrid00
+    y1 = iz0 * h + zgrid00
+    y2 = iz1 * h + zgrid00
 
     Q11 = get_values_from_table(ir0, iz0, time_table)
     Q12 = get_values_from_table(ir0, iz1, time_table)

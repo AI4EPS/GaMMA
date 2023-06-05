@@ -19,7 +19,7 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:
 def convert_picks_csv(picks, stations, config):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
     if type(picks["timestamp"].iloc[0]) is str:
-        picks["timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
+        picks.loc[:,"timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
     t = (
         picks["timestamp"]
         .apply(lambda x: x.tz_convert("UTC").timestamp() if x.tzinfo is not None else x.tz_localize("UTC").timestamp())
@@ -74,26 +74,32 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         unique_labels = [0]
 
     if "ncpu" not in config:
-        config["ncpu"] = min(len(unique_labels), max(1, mp.cpu_count() - 1))
+        config["ncpu"] = max(1, min(len(unique_labels)//4, mp.cpu_count() - 1))
 
-    if len(unique_labels) == 1:
-        event_idx = 0
+    if (config["ncpu"] == 1):
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
-        events, assignment = associate(
-            list(unique_labels)[0],
-            labels,
-            data,
-            locs,
-            phase_type,
-            phase_weight,
-            pick_idx,
-            pick_station_id,
-            config,
-            timestamp0,
-            vel,
-            method,
-            event_idx,
-        )
+        event_idx = 0
+        events = []
+        assignment = []
+        for unique_label in list(unique_labels):
+            events_, assignment_ = associate(
+                unique_label,
+                labels,
+                data,
+                locs,
+                phase_type,
+                phase_weight,
+                pick_idx,
+                pick_station_id,
+                config,
+                timestamp0,
+                vel,
+                method,
+                event_idx,
+            )
+            event_idx += len(events_)
+            events.extend(events_)
+            assignment.extend(assignment_)
     else:
         manager = mp.Manager()
         lock = manager.Lock()
@@ -167,13 +173,15 @@ def associate(
     pick_idx_=pick_idx[labels==k]
     pick_station_id_=pick_station_id[labels==k]
 
+    max_num_event = max(Counter(pick_station_id_).values())
+
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
         return [], []
 
     time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
 
-    ## initialization with 5 horizontal points and N//5 time points
-    centers_init, depth_slice = init_centers(config, data_, locs_, time_range)
+    ## initialization with [1,1,1] horizontal points and N time points
+    centers_init, depth_slice = init_centers(config, data_, locs_, time_range, max_num_event)
 
     ## run clustering
     mean_precision_prior = 0.01 / time_range
@@ -325,9 +333,9 @@ def associate(
             "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
             "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
             "gamma_score": prob_eq[i],
-            "number_picks": len(tmp_data[idx_filter]),
-            "number_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
-            "number_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
+            "num_picks": len(tmp_data[idx_filter]),
+            "num_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
+            "num_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
             "event_index": event_idx_value,
         }
         for j, k in enumerate(config["dims"]):  ## add location
@@ -342,7 +350,11 @@ def associate(
     return events, assignment
 
 
-def init_centers(config, data_, locs_, time_range):
+def init_centers(config, data_, locs_, time_range, max_num_event=1):
+    """
+    max_num_event: maximum number of events at one station
+    """
+
     if "initial_points" in config:
         initial_points = config["initial_points"]
         if not isinstance(initial_points, list):
@@ -353,7 +365,7 @@ def init_centers(config, data_, locs_, time_range):
     depth_slice = initial_points[2]
     initial_points[2] = 1
 
-    if ((np.prod(initial_points) + 1) * config["oversample_factor"]) > len(data_):
+    if (np.prod(initial_points) * max_num_event * config["oversample_factor"]) > len(data_):
         initial_points = [1, 1, 1]
 
     x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0] + 2)[1:-1]
@@ -361,7 +373,8 @@ def init_centers(config, data_, locs_, time_range):
     if initial_points[2] == 1:
         z_init = np.array([np.average(config["z(km)"])])
     else:   
-        z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
+        z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2] + 2)[1:-1]
+    # z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
     x_init = np.broadcast_to(x_init[:, np.newaxis, np.newaxis], initial_points).reshape(-1)
     y_init = np.broadcast_to(y_init[np.newaxis, :, np.newaxis], initial_points).reshape(-1)
     z_init = np.broadcast_to(z_init[np.newaxis, np.newaxis, :], initial_points).reshape(-1)
@@ -373,9 +386,10 @@ def init_centers(config, data_, locs_, time_range):
         z_init = np.append(z_init, 0)
     num_xyz_init = len(x_init)
 
-    num_sta = len(np.unique(locs_, axis=0))
-    num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
-    num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
+    # num_sta = len(np.unique(locs_, axis=0))
+    # num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
+    # num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
+    num_t_init = min(max_num_event * config["oversample_factor"], max(len(data_) // num_xyz_init, 1))
     t_init = np.sort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
     # t_init = np.linspace(
     #         data_[:, 0].min() - 0.1 * time_range,
