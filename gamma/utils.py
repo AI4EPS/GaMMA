@@ -1,6 +1,7 @@
 import multiprocessing as mp
 from collections import Counter
 from datetime import datetime
+import platform
 
 import numpy as np
 import pandas as pd
@@ -115,7 +116,15 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
         # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
         chunk_size = max(len(unique_labels)//(config["ncpu"]*20), 1)
-        with mp.Pool(config["ncpu"]) as p:
+        
+        # Check for OS to start a child process in multiprocessing
+        # https://superfastpython.com/multiprocessing-context-in-python/
+        if platform.system().lower() in ["darwin", "windows"]:
+            context = "spawn"
+        else:
+            context = "fork"
+        
+        with mp.get_context(context).Pool(config["ncpu"]) as p:
             results = p.starmap(
                 associate,
                 [
