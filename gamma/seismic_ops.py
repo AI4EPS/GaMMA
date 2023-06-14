@@ -3,55 +3,67 @@ import numpy as np
 import scipy.optimize
 import shelve
 from pathlib import Path
-from numba import jit
-
+from numba import njit
+from numba.typed import List
+import time
 
 ###################################### Eikonal Solver ######################################
 # |\nabla u| = f
 # ((u - a1)^+)^2 + ((u - a2)^+)^2 + ((u - a3)^+)^2 = f^2 h^2
 
-@jit
+
+@njit
 def calculate_unique_solution(a, b, f, h):
     d = abs(a - b)
     if d >= f * h:
-        return min(a, b) + f * h
+        return min([a, b]) + f * h
     else:
         return (a + b + np.sqrt(2 * f * f * h * h - (a - b) ** 2)) / 2
 
 
+@njit
 def sweeping_over_I_J_K(u, I, J, f, h):
     m = len(I)
     n = len(J)
 
-    for i, j in itertools.product(I, J):
-        if i == 0:
-            uxmin = u[i + 1, j]
-        elif i == m - 1:
-            uxmin = u[i - 1, j]
-        else:
-            uxmin = np.min([u[i - 1, j], u[i + 1, j]])
+    # for i, j in itertools.product(I, J):
+    for i in I:
+        for j in J:
+            if i == 0:
+                uxmin = u[i + 1, j]
+            elif i == m - 1:
+                uxmin = u[i - 1, j]
+            else:
+                uxmin = min([u[i - 1, j], u[i + 1, j]])
 
-        if j == 0:
-            uymin = u[i, j + 1]
-        elif j == n - 1:
-            uymin = u[i, j - 1]
-        else:
-            uymin = np.min([u[i, j - 1], u[i, j + 1]])
+            if j == 0:
+                uymin = u[i, j + 1]
+            elif j == n - 1:
+                uymin = u[i, j - 1]
+            else:
+                uymin = min([u[i, j - 1], u[i, j + 1]])
 
-        u_new = calculate_unique_solution(uxmin, uymin, f[i, j], h)
+            u_new = calculate_unique_solution(uxmin, uymin, f[i, j], h)
 
-        u[i, j] = np.min([u_new, u[i, j]])
+            u[i, j] = min([u_new, u[i, j]])
 
     return u
 
 
+@njit
 def sweeping(u, v, h):
     f = 1.0 / v  ## slowness
 
     m, n = u.shape
-    I = list(range(m))
+    # I = list(range(m))
+    # I = List()
+    # [I.append(i) for i in range(m)]
+    I = np.arange(m)
     iI = I[::-1]
-    J = list(range(n))
+    # J = list(range(n))
+    # J = List()
+    # [J.append(j) for j in range(n)]
+    J = np.arange(n)
     iJ = J[::-1]
 
     u = sweeping_over_I_J_K(u, I, J, f, h)
@@ -64,49 +76,59 @@ def sweeping(u, v, h):
 
 def eikonal_solve(u, f, h):
     print("Eikonal Solver: ")
+    t0 = time.time()
     for i in range(50):
         u_old = np.copy(u)
         u = sweeping(u, f, h)
 
         err = np.max(np.abs(u - u_old))
-        print(f"iteration {i}, error = {err}")
+        print(f"Iter {i}, error = {err:.3f}")
         if err < 1e-6:
             break
-
+    print(f"Time: {time.time() - t0:.3f}")
     return u
 
 
 ###################################### Traveltime based on Eikonal Timetable ######################################
-@jit
-def get_values_from_table(ir0, iz0, time_table):
-    v = np.zeros_like(ir0, dtype=np.float64)
-    for i in range(ir0.shape[0]):
-        r = ir0[i, 0]
-        z = iz0[i, 0]
-        v[i, 0] = time_table[r, z]
-    return v
+@njit
+def _get_index(ir, iz, nr, nz, order="C"):
+    if order == "C":
+        return ir * nz + iz
+    elif order == "F":
+        return iz * nr + ir
+    else:
+        raise ValueError("order must be either C or F")
 
 
-@jit
-def _interp(time_table, r, z, rgrid, zgrid, h):
-    rgrid00 = rgrid[0, 0]
-    zgrid00 = zgrid[0, 0]
+def test_get_index():
+    vr, vz = np.meshgrid(np.arange(10), np.arange(20), indexing="ij")
+    vr = vr.flatten()
+    vz = vz.flatten()
+    nr = 10
+    nz = 20
+    for ir in range(nr):
+        for iz in range(nz):
+            assert vr[_get_index(ir, iz, nr, nz)] == ir
+            assert vz[_get_index(ir, iz, nr, nz)] == iz
 
-    ir0 = np.floor((r - rgrid00) / h).clip(0, rgrid.shape[0] - 2).astype(np.int64)
-    iz0 = np.floor((z - zgrid00) / h).clip(0, zgrid.shape[1] - 2).astype(np.int64)
+
+@njit
+def _interp(time_table, r, z, rgrid0, zgrid0, nr, nz, h):
+    ir0 = np.floor((r - rgrid0) / h).clip(0, nr - 2).astype(np.int64)
+    iz0 = np.floor((z - zgrid0) / h).clip(0, nz - 2).astype(np.int64)
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
     ## https://en.wikipedia.org/wiki/Bilinear_interpolation
-    x1 = ir0 * h + rgrid00
-    x2 = ir1 * h + rgrid00
-    y1 = iz0 * h + zgrid00
-    y2 = iz1 * h + zgrid00
+    x1 = ir0 * h + rgrid0
+    x2 = ir1 * h + rgrid0
+    y1 = iz0 * h + zgrid0
+    y2 = iz1 * h + zgrid0
 
-    Q11 = get_values_from_table(ir0, iz0, time_table)
-    Q12 = get_values_from_table(ir0, iz1, time_table)
-    Q21 = get_values_from_table(ir1, iz0, time_table)
-    Q22 = get_values_from_table(ir1, iz1, time_table)
+    Q11 = time_table[_get_index(ir0, iz0, nr, nz)]
+    Q12 = time_table[_get_index(ir0, iz1, nr, nz)]
+    Q21 = time_table[_get_index(ir1, iz0, nr, nz)]
+    Q22 = time_table[_get_index(ir1, iz1, nr, nz)]
 
     t = (
         1
@@ -123,22 +145,59 @@ def _interp(time_table, r, z, rgrid, zgrid, h):
     return t
 
 
-def traveltime(event_loc, station_loc, time_table, rgrid, zgrid, h, **kwargs):
-    r = np.linalg.norm(event_loc[:, :2] - station_loc[:, :2], axis=-1, keepdims=True)
-    z = event_loc[:, 2:] - station_loc[:, 2:]
-    if (event_loc[:, 2:] < 0).any():
-        print(f"Warning: depth is defined as positive down: {event_loc[:, 2:].detach().numpy()}")
+def traveltime(event_loc, station_loc, phase_type, eikonal):
+    r = np.linalg.norm(event_loc[:, :2] - station_loc[:, :2], axis=-1, keepdims=False)
+    z = event_loc[:, 2] - station_loc[:, 2]
 
-    tt = _interp(time_table, r, z, rgrid, zgrid, h)
+    rgrid0 = eikonal["rgrid"][0]
+    zgrid0 = eikonal["zgrid"][0]
+    nr = eikonal["nr"]
+    nz = eikonal["nz"]
+    h = eikonal["h"]
+
+    # tt = _interp(time_table, r, z, rgrid[0], zgrid[0], nr, nz, h)
+
+    p_index = phase_type == "p"
+    s_index = phase_type == "s"
+    tt = np.zeros(len(phase_type), dtype=np.float32)
+    tt[phase_type == "p"] = _interp(eikonal["up"], r[p_index], z[p_index], rgrid0, zgrid0, nr, nz, h)
+    tt[phase_type == "s"] = _interp(eikonal["us"], r[s_index], z[s_index], rgrid0, zgrid0, nr, nz, h)
+    tt = tt[:, np.newaxis]
 
     return tt
 
 
-##################################################################################################################
+def grad_traveltime(event_loc, station_loc, phase_type, eikonal):
+    r = np.linalg.norm(event_loc[:, :2] - station_loc[:, :2], axis=-1, keepdims=False)
+    z = event_loc[:, 2] - station_loc[:, 2]
+
+    rgrid0 = eikonal["rgrid"][0]
+    zgrid0 = eikonal["zgrid"][0]
+    nr = eikonal["nr"]
+    nz = eikonal["nz"]
+    h = eikonal["h"]
+
+    p_index = phase_type == "p"
+    s_index = phase_type == "s"
+    dt_dr = np.zeros(len(phase_type))
+    dt_dz = np.zeros(len(phase_type))
+    dt_dr[p_index] = _interp(eikonal["grad_up"][0], r[p_index], z[p_index], rgrid0, zgrid0, nr, nz, h)
+    dt_dr[s_index] = _interp(eikonal["grad_us"][0], r[s_index], z[s_index], rgrid0, zgrid0, nr, nz, h)
+    dt_dz[p_index] = _interp(eikonal["grad_up"][1], r[p_index], z[p_index], rgrid0, zgrid0, nr, nz, h)
+    dt_dz[s_index] = _interp(eikonal["grad_us"][1], r[s_index], z[s_index], rgrid0, zgrid0, nr, nz, h)
+
+    dr_dxy = (event_loc[:, :-2] - station_loc[:, :-1]) / (r[:, np.newaxis] + 1e-6)
+    dt_dxy = dt_dr[:, np.newaxis] * dr_dxy
+
+    grad = np.column_stack((dt_dxy, dt_dz[:, np.newaxis]))
+
+    return grad
+
+
+############################################# Seismic Ops for GaMMA #####################################################################
 
 
 def calc_time(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75}, eikonal=None, **kwargs):
-
     ev_loc = event_loc[:, :-1]
     ev_t = event_loc[:, -1:]
 
@@ -146,35 +205,11 @@ def calc_time(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75
         v = np.array([vel[x] for x in phase_type])[:, np.newaxis]
         tt = np.linalg.norm(ev_loc - station_loc, axis=-1, keepdims=True) / v + ev_t
     else:
-        tp = traveltime(
-            ev_loc,
-            station_loc[phase_type == "p"],
-            eikonal["up"],
-            eikonal["rgrid"],
-            eikonal["zgrid"],
-            eikonal["h"],
-            **kwargs,
-        )
-        ts = traveltime(
-            ev_loc,
-            station_loc[phase_type == "s"],
-            eikonal["us"],
-            eikonal["rgrid"],
-            eikonal["zgrid"],
-            eikonal["h"],
-            **kwargs,
-        )
-
-        tt = np.zeros(len(phase_type), dtype=np.float32)[:, np.newaxis]
-        tt[phase_type == "p"] = tp
-        tt[phase_type == "s"] = ts
-        tt = tt + ev_t
-
+        tt = traveltime(event_loc, station_loc, phase_type, eikonal) + ev_t
     return tt
 
 
 def calc_mag(data, event_loc, station_loc, weight, min=-2, max=8):
-
     dist = np.linalg.norm(event_loc[:, :-1] - station_loc, axis=-1, keepdims=True)
     # mag_ = ( data - 2.48 + 2.76 * np.log10(dist) )
     ## Picozzi et al. (2018) A rapid response magnitude scale...
@@ -193,7 +228,6 @@ def calc_mag(data, event_loc, station_loc, weight, min=-2, max=8):
 
 
 def calc_amp(mag, event_loc, station_loc):
-
     dist = np.linalg.norm(event_loc[:, :-1] - station_loc, axis=-1, keepdims=True)
     # logA = mag + 2.48 - 2.76 * np.log10(dist)
     ## Picozzi et al. (2018) A rapid response magnitude scale...
@@ -205,50 +239,23 @@ def calc_amp(mag, event_loc, station_loc):
     return logA
 
 
-################################################ Location ################################################
-def calc_td(r, z, phase_type, eikonal):
-    t_d = np.zeros([phase_type.shape[0], 3])
-    t_r_p = _interp(eikonal['dp_r'],
-                    r[phase_type == 'p'], 
-                    z[phase_type == 'p'], 
-                    eikonal['rgrid'], 
-                    eikonal['zgrid'], 
-                    eikonal['h'])
-    t_z_p = _interp(eikonal['dp_z'],
-                    r[phase_type == 'p'], 
-                    z[phase_type == 'p'], 
-                    eikonal['rgrid'], 
-                    eikonal['zgrid'], 
-                    eikonal['h'])
-    t_r_s = _interp(eikonal['ds_r'],
-                    r[phase_type == 's'], 
-                    z[phase_type == 's'], 
-                    eikonal['rgrid'], 
-                    eikonal['zgrid'], 
-                    eikonal['h'])
-    t_z_s = _interp(eikonal['ds_z'],
-                    r[phase_type == 's'], 
-                    z[phase_type == 's'], 
-                    eikonal['rgrid'], 
-                    eikonal['zgrid'], 
-                    eikonal['h'])
-    
-    t_d[phase_type == "p"] = np.column_stack([t_r_p, t_r_p, t_z_p])
-    t_d[phase_type == "s"] = np.column_stack([t_r_s, t_r_s, t_z_s])
-    
-    return t_d
+################################################ Earthquake Location ################################################
 
 
-def huber_loss_grad(event_loc, phase_time, phase_type, station_loc, weight, vel={"p": 6.0, "s": 6.0 / 1.75}, sigma=1, eikonal=None):
+def huber_loss_grad(
+    event_loc, phase_time, phase_type, station_loc, weight, vel={"p": 6.0, "s": 6.0 / 1.75}, sigma=1, eikonal=None
+):
     event_loc = event_loc[np.newaxis, :]
     predict_time = calc_time(event_loc, station_loc, phase_type, vel, eikonal)
     t_diff = predict_time - phase_time
-    
+
     l1 = np.squeeze((np.abs(t_diff) > sigma))
     l2 = np.squeeze((np.abs(t_diff) <= sigma))
 
     # loss
-    loss = np.sum((sigma * np.abs(t_diff[l1]) - 0.5 * sigma**2) * weight[l1]) + np.sum(0.5 * t_diff[l2] ** 2 * weight[l2])
+    loss = np.sum((sigma * np.abs(t_diff[l1]) - 0.5 * sigma**2) * weight[l1]) + np.sum(
+        0.5 * t_diff[l2] ** 2 * weight[l2]
+    )
     J = np.zeros([phase_time.shape[0], event_loc.shape[1]])
 
     # gradient
@@ -257,12 +264,8 @@ def huber_loss_grad(event_loc, phase_time, phase_type, station_loc, weight, vel=
         dist = np.linalg.norm(event_loc[:, :-1] - station_loc, axis=-1, keepdims=True)
         J[:, :-1] = (event_loc[:, :-1] - station_loc) / (dist + 1e-6) / v
     else:
-        r = np.linalg.norm(event_loc[:, :-2] - station_loc[:, :-1], axis=-1, keepdims=True)
-        z = event_loc[:, -2:-1] - station_loc[:, -1:]
-        d_x = np.column_stack([(event_loc[:, :-2] - station_loc[:, :-1]) / (r + 1e-6), 
-                               np.ones_like(station_loc[:, 0:1])])
-        t_d = calc_td(r, z, phase_type, eikonal)
-        J[:, :-1] = d_x * t_d
+        grad = grad_traveltime(event_loc, station_loc, phase_type, eikonal)
+        J[:, :-1] = grad
     J[:, -1] = 1
 
     J_ = np.sum(sigma * np.sign(t_diff[l1]) * J[l1] * weight[l1], axis=0, keepdims=True) + np.sum(
@@ -283,12 +286,12 @@ def calc_loc(
     bounds=None,
     max_iter=100,
     convergence=1e-6,
-    depth_slice=1
-): 
+    depth_slice=1,
+):
     if bounds != None:
-        depths = np.linspace(bounds[2][0], bounds[2][1], depth_slice+1)
-        depths = [(depths[i], depths[i+1]) for i in range(len(depths)-1)]
-    
+        depths = np.linspace(bounds[2][0], bounds[2][1], depth_slice + 1)
+        depths = [(depths[i], depths[i + 1]) for i in range(len(depths) - 1)]
+
     losses = np.zeros(depth_slice)
     locs = np.zeros([depth_slice, event_loc0.shape[1]])
     for i in range(len(depths)):
@@ -311,74 +314,79 @@ def calc_loc(
 
 
 def initialize_eikonal(config):
-    path = Path('./eikonal')
+    path = Path("./eikonal")
     path.mkdir(exist_ok=True)
     rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
     zlim = config["zlim"]
     h = config["h"]
-    
-    f = '_'.join([str(x) for x in [int(rlim[0]), int(rlim[1]), int(zlim[0]), int(zlim[1]), config['h']]])
-    if (path / (f+'.dir')).is_file():
-        with shelve.open(str(path / f)) as e:
-            up = e['up']
-            us = e['us']
-            rgrid = e['rgrid']
-            zgrid = e['zgrid']
-            dp_r = e['dp_r']
-            ds_r = e['ds_r']
-            dp_z = e['dp_z']
-            ds_z = e['ds_z']
+
+    filename = f"timetable_{rlim[0]:.0f}_{rlim[1]:.0f}_{zlim[0]:.0f}_{zlim[1]:.0f}_{h:.3f}"
+    if (path / (filename + ".dir")).is_file():
+        print("Loading precomputed timetable...")
+        with shelve.open(str(path / filename)) as db:
+            up = db["up"]
+            us = db["us"]
+            grad_up = db["grad_up"]
+            grad_us = db["grad_us"]
+            rgrid = db["rgrid"]
+            zgrid = db["zgrid"]
+            nr = db["nr"]
+            nz = db["nz"]
+            h = db["h"]
     else:
-        edge_grids = 3
+        edge_grids = 0
 
         rgrid = np.arange(rlim[0] - edge_grids * h, rlim[1], h)
         zgrid = np.arange(zlim[0] - edge_grids * h, zlim[1], h)
-        m, n = len(rgrid), len(zgrid)
+        nr, nz = len(rgrid), len(zgrid)
 
         vel = config["vel"]
         zz, vp, vs = vel["z"], vel["p"], vel["s"]
         vp1d = np.interp(zgrid, zz, vp)
         vs1d = np.interp(zgrid, zz, vs)
-        vp = np.ones((m, n)) * vp1d
-        vs = np.ones((m, n)) * vs1d
+        vp = np.ones((nr, nz)) * vp1d
+        vs = np.ones((nr, nz)) * vs1d
 
-        up = 1000 * np.ones((m, n))
+        up = 1000.0 * np.ones((nr, nz))
         up[edge_grids, edge_grids] = 0.0
         up = eikonal_solve(up, vp, h)
 
-        us = 1000 * np.ones((m, n))
+        grad_up = np.gradient(up, h)
+
+        us = 1000.0 * np.ones((nr, nz))
         us[edge_grids, edge_grids] = 0.0
         us = eikonal_solve(us, vs, h)
 
-        dp_r = (np.append(up, 2*up[-1:, :]-up[-2:-1, :], axis=0)[1:, :] 
-                -
-                np.insert(up, [0], 2*up[0:1, :]-up[1:2, :], axis = 0)[:-1, :]) / (2*h) 
-        
-        ds_r = (np.append(us, 2*us[-1:, :]-us[-2:-1, :], axis=0)[1:, :] 
-                -
-                np.insert(us, [0], 2*us[0:1, :]-us[1:2, :], axis = 0)[:-1, :]) / (2*h) 
-        
-        dp_z = (np.append(up, 2*up[:, -1:]-up[:, -2:-1], axis=1)[:, 1:]
-                -
-                np.insert(up, [0], 2*up[:, 0:1]-up[:, 1:2], axis = 1)[:, :-1]) / (2*h)
-        
-        ds_z = (np.append(us, 2*us[:, -1:]-us[:, -2:-1], axis=1)[:, 1:]
-                -
-                np.insert(us, [0], 2*us[:, 0:1]-us[:, 1:2], axis = 1)[:, :-1]) / (2*h)
+        grad_us = np.gradient(us, h)
 
-        rgrid, zgrid = np.meshgrid(rgrid, zgrid, indexing="ij")
-        with shelve.open(str(path / f)) as e:
-            e['up'] = up
-            e['us'] = us
-            e['rgrid'] = rgrid
-            e['zgrid'] = zgrid
-            e['dp_r'] = dp_r
-            e['ds_r'] = ds_r
-            e['dp_z'] = dp_z
-            e['ds_z'] = ds_z
+        with shelve.open(str(path / filename)) as db:
+            db["up"] = up
+            db["us"] = us
+            db["grad_up"] = grad_up
+            db["grad_us"] = grad_us
+            db["rgrid"] = rgrid
+            db["zgrid"] = zgrid
+            db["nr"] = nr
+            db["nz"] = nz
+            db["h"] = h
 
-    
-    config.update({"up": up, "us": us, "rgrid": rgrid, "zgrid": zgrid, "h": h, "dp_r": dp_r, "ds_r": ds_r, "dp_z": dp_z, "ds_z": ds_z})
+    up = up.flatten()
+    us = us.flatten()
+    grad_up = np.array([grad_up[0].flatten(), grad_up[1].flatten()])
+    grad_us = np.array([grad_us[0].flatten(), grad_us[1].flatten()])
+    config.update(
+        {
+            "up": up,
+            "us": us,
+            "grad_up": grad_up,
+            "grad_us": grad_us,
+            "rgrid": rgrid,
+            "zgrid": zgrid,
+            "nr": nr,
+            "nz": nz,
+            "h": h,
+        }
+    )
 
     return config
 
@@ -416,8 +424,9 @@ def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
     resp_sum = resp.sum(axis=1, keepdims=True)
     resp_sum[resp_sum == 0] = 1.0
     resp = resp / resp_sum
+
     # dist = np.linalg.norm(means - X, axis=-1) # (n_components, n_samples, n_features) -> (n_components, n_samples)
-    # resp = np.exp(-dist/np.median(dist, axis=0, keepdims=True)).T 
+    # resp = np.exp(-dist/np.median(dist, axis=0, keepdims=True)).T
     # resp /= np.sum(resp, axis=1, keepdims=True) # (n_components, n_samples)
 
     if n_features == 2:

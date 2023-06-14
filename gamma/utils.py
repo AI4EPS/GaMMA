@@ -119,11 +119,11 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         
         # Check for OS to start a child process in multiprocessing
         # https://superfastpython.com/multiprocessing-context-in-python/
-        if platform.system().lower() in ["darwin", "windows"]:
-            context = "spawn"
-        else:
-            context = "fork"
-        
+        # if platform.system().lower() in ["darwin", "windows"]:
+        #     context = "spawn"
+        # else:
+        #     context = "fork"
+        context = "spawn"
         with mp.get_context(context).Pool(config["ncpu"]) as p:
             results = p.starmap(
                 associate,
@@ -355,7 +355,7 @@ def associate(
             assignment.append((pi, event_idx_value, pr))
 
         if (event_idx_value + 1) % 100 == 0:
-            print(f"\nFinish {event_idx_value} events")
+            print(f"\nAssociated {event_idx_value + 1} events")
     return events, assignment
 
 
