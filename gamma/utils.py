@@ -353,7 +353,7 @@ def associate(
             assignment.append((pi, event_idx_value, pr))
 
         if (event_idx_value + 1) % 100 == 0:
-            print(f"\nFinish {event_idx_value} events")
+            print(f"\nAssociated {event_idx_value + 1} events")
     return events, assignment
 
 
