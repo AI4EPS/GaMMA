@@ -376,6 +376,15 @@ def init_centers(config, data_, locs_, time_range, max_num_event=1):
     y_init = np.linspace(config["y(km)"][0], config["y(km)"][1], initial_points[1] + 2)[1:-1]
     z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2] + 2)[1:-1]
     # z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
+
+    ## manually set initial points
+    if "x_init" in config:
+        x_init = np.array(config["x_init"])
+    if "y_init" in config:
+        y_init = np.array(config["y_init"])
+    if "z_init" in config:
+        z_init = np.array(config["z_init"])
+
     x_init = np.broadcast_to(x_init[:, np.newaxis, np.newaxis], initial_points).reshape(-1)
     y_init = np.broadcast_to(y_init[np.newaxis, :, np.newaxis], initial_points).reshape(-1)
     z_init = np.broadcast_to(z_init[np.newaxis, np.newaxis, :], initial_points).reshape(-1)
@@ -385,12 +394,13 @@ def init_centers(config, data_, locs_, time_range, max_num_event=1):
         x_init = np.append(x_init, np.mean(config["x(km)"]))
         y_init = np.append(y_init, np.mean(config["y(km)"]))
         z_init = np.append(z_init, 0)
+
     num_xyz_init = len(x_init)
 
     # num_sta = len(np.unique(locs_, axis=0))
     # num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
     # num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
-    num_t_init = min(max_num_event * config["oversample_factor"], max(len(data_) // num_xyz_init, 1))
+    num_t_init = min(max(int(max_num_event * config["oversample_factor"]), 1), max(len(data_) // num_xyz_init, 1))
     t_init = np.sort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
     # t_init = np.linspace(
     #         data_[:, 0].min() - 0.1 * time_range,
@@ -413,26 +423,5 @@ def init_centers(config, data_, locs_, time_range, max_num_event=1):
 
     if config["use_amplitude"]:
         centers_init = np.hstack([centers_init, 1.0 * np.ones((len(centers_init), 1))])  # init magnitude to 1.0
-
-    # import matplotlib.pyplot as plt
-    # plt.figure()
-    # plt.scatter(x_init, y_init)
-    # plt.savefig("initial_points_xy.png")
-    # plt.figure()
-    # plt.scatter(x_init, z_init)
-    # plt.savefig("initial_points_xz.png")
-    # plt.figure()
-    # plt.scatter(y_init, z_init)
-    # plt.savefig("initial_points_yz.png")
-
-    # plt.figure()
-    # plt.scatter(t_init, x_init)
-    # plt.savefig("initial_points_tx.png")
-    # plt.figure()
-    # plt.scatter(t_init, y_init)
-    # plt.savefig("initial_points_ty.png")
-    # plt.figure()
-    # plt.scatter(t_init, z_init)
-    # plt.savefig("initial_points_tz.png")
 
     return centers_init
