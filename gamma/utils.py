@@ -20,7 +20,7 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:
 def convert_picks_csv(picks, stations, config):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
     if type(picks["timestamp"].iloc[0]) is str:
-        picks.loc[:,"timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
+        picks.loc[:, "timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
     t = (
         picks["timestamp"]
         .apply(lambda x: x.tz_convert("UTC").timestamp() if x.tzinfo is not None else x.tz_localize("UTC").timestamp())
@@ -56,6 +56,9 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         picks, stations, config
     )
 
+    if len(data) < config["min_picks_per_eq"]:
+        return [], []
+
     vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
     if ("eikonal" not in config) or (config["eikonal"] is None):
         config["eikonal"] = None
@@ -75,13 +78,12 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         unique_labels = [0]
 
     if "ncpu" not in config:
-        config["ncpu"] = max(1, min(len(unique_labels)//4, mp.cpu_count() - 1))
+        config["ncpu"] = max(1, min(len(unique_labels) // 4, mp.cpu_count() - 1))
 
-    if (config["ncpu"] == 1):
+    if config["ncpu"] == 1:
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
         event_idx = 0
-        events = []
-        assignment = []
+        events, assignment = [], []
         for unique_label in list(unique_labels):
             events_, assignment_ = associate(
                 unique_label,
@@ -110,20 +112,20 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
 
         # the following sort and shuffle is to make sure jobs are distributed evenly
-        counter=Counter(labels)
+        counter = Counter(labels)
         unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
         np.random.shuffle(unique_labels)
 
         # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
-        chunk_size = max(len(unique_labels)//(config["ncpu"]*20), 1)
-        
+        chunk_size = max(len(unique_labels) // (config["ncpu"] * 20), 1)
+
         # Check for OS to start a child process in multiprocessing
         # https://superfastpython.com/multiprocessing-context-in-python/
         if platform.system().lower() in ["darwin", "windows"]:
             context = "spawn"
         else:
             context = "fork"
-        
+
         with mp.get_context(context).Pool(config["ncpu"]) as p:
             results = p.starmap(
                 associate,
@@ -150,12 +152,13 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             )
             # resuts is a list of tuples, each tuple contains two lists events and assignment
             # here we flatten the list of tuples into two lists
-            events, assignment = [],[]
+            events, assignment = [], []
             for each_events, each_assignment in results:
                 events.extend(each_events)
                 assignment.extend(each_assignment)
 
-    return events, assignment # , event_idx.value
+    return events, assignment  # , event_idx.value
+
 
 def associate(
     k,
@@ -174,13 +177,13 @@ def associate(
     lock=None,
 ):
     print(".", end="")
-    
-    data_=data[labels==k]
-    locs_=locs[labels==k]
-    phase_type_=phase_type[labels==k]
-    phase_weight_=phase_weight[labels==k]
-    pick_idx_=pick_idx[labels==k]
-    pick_station_id_=pick_station_id[labels==k]
+
+    data_ = data[labels == k]
+    locs_ = locs[labels == k]
+    phase_type_ = phase_type[labels == k]
+    phase_weight_ = phase_weight[labels == k]
+    pick_idx_ = pick_idx[labels == k]
+    pick_station_id_ = pick_station_id[labels == k]
 
     max_num_event = max(Counter(pick_station_id_).values())
 
