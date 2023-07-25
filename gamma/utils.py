@@ -6,6 +6,7 @@ import platform
 import numpy as np
 import pandas as pd
 from sklearn.cluster import DBSCAN
+from scipy.sparse.csgraph import minimum_spanning_tree
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
@@ -15,6 +16,14 @@ to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
 # to_seconds = lambda t: datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f").timestamp()
 # from_seconds = lambda t: [datetime.utcfromtimestamp(x).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] for x in t]
+
+
+def estimate_station_spacing(stations):
+    X = stations[["x(km)", "y(km)", "z(km)"]].values
+    D = np.sqrt(((X[:, np.newaxis, :] -  X[np.newaxis, :, :])**2).sum(axis=-1))
+    Tcsr = minimum_spanning_tree(D).toarray()
+    spacing = Tcsr[Tcsr > 0].mean() 
+    return spacing
 
 
 def convert_picks_csv(picks, stations, config):
