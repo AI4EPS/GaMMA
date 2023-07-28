@@ -43,7 +43,7 @@ def convert_picks_csv(picks, stations, config):
         data = np.stack([t, a]).T
     else:
         data = t[:, np.newaxis]
-    meta = stations.merge(picks["id"], how="right", on="id")
+    meta = stations.merge(picks["id"], how="right", on="id", validate="one_to_many")
     locs = meta[config["dims"]].to_numpy()
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
