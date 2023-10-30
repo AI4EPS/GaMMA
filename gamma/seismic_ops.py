@@ -217,6 +217,8 @@ def calc_mag(data, event_loc, station_loc, weight, min=-2, max=8):
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # mag_ = (data - c0 - c3*np.log10(dist))/c1
     # mag = np.sum(mag_ * weight) / (np.sum(weight)+1e-6)
+    # (Watanabe, 1971) https://www.jstage.jst.go.jp/article/zisin1948/24/3/24_3_189/_pdf/-char/ja
+    # mag_ = 1.0/0.85 * (data + 1.73 * np.log10(np.maximum(dist, 0.1)) + 2.50)
     mu = np.sum(mag_ * weight) / (np.sum(weight) + 1e-6)
     std = np.sqrt(np.sum((mag_ - mu) ** 2 * weight) / (np.sum(weight) + 1e-12))
     mask = np.abs(mag_ - mu) <= 2 * std
@@ -234,6 +236,8 @@ def calc_amp(mag, event_loc, station_loc):
     ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # logA = c0 + c1*mag + c3*np.log10(dist)
+    # (Watanabe, 1971) https://www.jstage.jst.go.jp/article/zisin1948/24/3/24_3_189/_pdf/-char/ja
+    # logA = 0.85 * mag - 2.50 - 1.73 * np.log10(np.maximum(dist, 0.1))
     return logA
 
 
