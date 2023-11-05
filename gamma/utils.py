@@ -1,12 +1,12 @@
 import multiprocessing as mp
+import platform
 from collections import Counter
 from datetime import datetime
-import platform
 
 import numpy as np
 import pandas as pd
-from sklearn.cluster import DBSCAN
 from scipy.sparse.csgraph import minimum_spanning_tree
+from sklearn.cluster import DBSCAN
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
@@ -18,12 +18,21 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:
 # from_seconds = lambda t: [datetime.utcfromtimestamp(x).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] for x in t]
 
 
-def estimate_station_spacing(stations):
+# def estimate_station_spacing(stations):
+def estimate_eps(stations, vp, sigma=3.0):
     X = stations[["x(km)", "y(km)", "z(km)"]].values
-    D = np.sqrt(((X[:, np.newaxis, :] -  X[np.newaxis, :, :])**2).sum(axis=-1))
+    D = np.sqrt(((X[:, np.newaxis, :] - X[np.newaxis, :, :]) ** 2).sum(axis=-1))
     Tcsr = minimum_spanning_tree(D).toarray()
-    spacing = np.median(Tcsr[Tcsr > 0])
-    return spacing
+
+    # Tcsr = Tcsr[Tcsr > 0]
+    # # mean = np.median(Tcsr)
+    # mean = np.mean(Tcsr)
+    # std = np.std(Tcsr)
+    # eps = (mean + sigma * std) / vp
+
+    eps = np.max(Tcsr) / vp * 1.5
+
+    return eps
 
 
 def convert_picks_csv(picks, stations, config):
