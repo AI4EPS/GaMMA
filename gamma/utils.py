@@ -22,7 +22,7 @@ def estimate_station_spacing(stations):
     X = stations[["x(km)", "y(km)", "z(km)"]].values
     D = np.sqrt(((X[:, np.newaxis, :] -  X[np.newaxis, :, :])**2).sum(axis=-1))
     Tcsr = minimum_spanning_tree(D).toarray()
-    spacing = Tcsr[Tcsr > 0].mean() 
+    spacing = np.median(Tcsr[Tcsr > 0])
     return spacing
 
 
