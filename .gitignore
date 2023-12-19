@@ -6,8 +6,10 @@ figures
 .DS_Store
 .ipynb_checkpoints
 
-docs/test_data.zip*
+docs/test_data.zip
+docs/demo.tar
 docs/test_data
+docs/results
 tests/test_data.zip*
 tests/test_data
 
