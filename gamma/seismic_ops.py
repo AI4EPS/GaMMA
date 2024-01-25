@@ -155,6 +155,8 @@ def traveltime(event_loc, station_loc, phase_type, eikonal):
     nz = eikonal["nz"]
     h = eikonal["h"]
 
+    if isinstance(phase_type, list):
+        phase_type = np.array(phase_type)
     p_index = phase_type == "p"
     s_index = phase_type == "s"
     tt = np.zeros(len(phase_type), dtype=np.float32)
@@ -175,6 +177,8 @@ def grad_traveltime(event_loc, station_loc, phase_type, eikonal):
     nz = eikonal["nz"]
     h = eikonal["h"]
 
+    if isinstance(phase_type, list):
+        phase_type = np.array(phase_type)
     p_index = phase_type == "p"
     s_index = phase_type == "s"
     dt_dr = np.zeros(len(phase_type))
