@@ -4,18 +4,21 @@
 # License: BSD 3 clause
 
 import math
+
 import numpy as np
 from scipy.special import betaln, digamma, gammaln
 from sklearn.utils import check_array
 from sklearn.utils.validation import _deprecate_positional_args
 
 from ._base import BaseMixture, _check_shape
-from ._gaussian_mixture import _check_precision_matrix
-from ._gaussian_mixture import _check_precision_positivity
-from ._gaussian_mixture import _compute_log_det_cholesky
-from ._gaussian_mixture import _compute_precision_cholesky
-from ._gaussian_mixture import _estimate_gaussian_parameters
-from ._gaussian_mixture import _estimate_log_gaussian_prob
+from ._gaussian_mixture import (
+    _check_precision_matrix,
+    _check_precision_positivity,
+    _compute_log_det_cholesky,
+    _compute_precision_cholesky,
+    _estimate_gaussian_parameters,
+    _estimate_log_gaussian_prob,
+)
 from .seismic_ops import *
 
 
@@ -570,10 +573,12 @@ class BayesianGaussianMixture(BaseMixture):
 
         xk : array-like, shape (n_components, n_features)
         """
-        self.mean_precision_ = self.mean_precision_prior_ + nk
-        self.means_ = ((self.mean_precision_prior_ * self.mean_prior_ +
-                        nk[:, np.newaxis, np.newaxis] * xk) /
-                       self.mean_precision_[:, np.newaxis, np.newaxis])
+        # self.mean_precision_ = self.mean_precision_prior_ + nk
+        # self.means_ = ((self.mean_precision_prior_ * self.mean_prior_ +
+        #                 nk[:, np.newaxis, np.newaxis] * xk) /
+        #                self.mean_precision_[:, np.newaxis, np.newaxis])
+        self.mean_precision_ = nk
+        self.means_ = xk
 
     def _estimate_precisions(self, nk, xk, sk):
         """Estimate the precisions parameters of the precision distribution.
@@ -622,13 +627,15 @@ class BayesianGaussianMixture(BaseMixture):
 
         self.covariances_ = np.empty((self.n_components, n_features, n_features))
 
-        for k in range(self.n_components):
-            diff = xk[k] - self.mean_prior_
-            self.covariances_[k] = (self.covariance_prior_ + nk[k] * sk[k] +
-                                    nk[k] * self.mean_precision_prior_ /
-                                    # self.mean_precision_[k] * np.outer(diff, diff))
-                                    self.mean_precision_[k] * np.dot(diff.T, diff)/n_samples)
-
+        # for k in range(self.n_components):
+            # diff = xk[k] - self.mean_prior_
+            # self.covariances_[k] = (self.covariance_prior_ + nk[k] * sk[k] +
+            #                         nk[k] * self.mean_precision_prior_ /
+            #                         # self.mean_precision_[k] * np.outer(diff, diff))
+            #                         self.mean_precision_[k] * np.dot(diff.T, diff)/n_samples)
+        # print(f"{self.covariance_prior_.shape = }", f"{sk.shape = }", f"{nk.shape = }")
+        self.covariances_ = self.covariance_prior_[np.newaxis, :, :] + nk[:, np.newaxis, np.newaxis] * sk
+                                    
         # Contrary to the original bishop book, we normalize the covariances
         self.covariances_ /= (
             self.degrees_of_freedom_[:, np.newaxis, np.newaxis])
@@ -663,6 +670,8 @@ class BayesianGaussianMixture(BaseMixture):
         # Contrary to the original bishop book, we normalize the covariances
         self.covariances_ /= self.degrees_of_freedom_
 
+        raise # not implemented
+
     def _estimate_wishart_diag(self, nk, xk, sk):
         """Estimate the diag Wishart distribution parameters.
 
@@ -683,7 +692,7 @@ class BayesianGaussianMixture(BaseMixture):
         # is the correct formula
         self.degrees_of_freedom_ = self.degrees_of_freedom_prior_ + nk
 
-        diff = xk - self.mean_prior_
+        diff = xk - self.means_
         self.covariances_ = (
             self.covariance_prior_ + nk[:, np.newaxis] * (
                 sk + (self.mean_precision_prior_ /
@@ -691,6 +700,8 @@ class BayesianGaussianMixture(BaseMixture):
 
         # Contrary to the original bishop book, we normalize the covariances
         self.covariances_ /= self.degrees_of_freedom_[:, np.newaxis]
+
+        raise # not implemented
 
     def _estimate_wishart_spherical(self, nk, xk, sk):
         """Estimate the spherical Wishart distribution parameters.
@@ -720,6 +731,8 @@ class BayesianGaussianMixture(BaseMixture):
 
         # Contrary to the original bishop book, we normalize the covariances
         self.covariances_ /= self.degrees_of_freedom_
+
+        raise # not implemented
 
     def _m_step(self, X, log_resp):
         """M step.

@@ -211,16 +211,22 @@ def associate(
         return [], []
 
     time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
+    if config["use_amplitude"]:
+        amp_range = max(data_[:, 1].max() - data_[:, 1].min(), 1)
 
     ## initialization with [1,1,1] horizontal points and N time points
     centers_init = init_centers(config, data_, locs_, time_range, max_num_event)
 
     ## run clustering
-    mean_precision_prior = 0.01 / time_range
+    # mean_precision_prior = 0.01 / time_range
     if "covariance_prior" in config:
         covariance_prior_pre = config["covariance_prior"]
     else:
-        covariance_prior_pre = [5.0, 2.0]
+        # covariance_prior_pre = [5.0, 2.0]
+        if config["use_amplitude"]:
+            covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
+        else:
+            covariance_prior_pre = [time_range * 10.0]
     if config["use_amplitude"]:
         covariance_prior = np.array([[covariance_prior_pre[0], 0.0], [0.0, covariance_prior_pre[1]]])
     else:
@@ -230,8 +236,8 @@ def associate(
     if method == "BGMM":
         gmm = BayesianGaussianMixture(
             n_components=len(centers_init),
-            weight_concentration_prior=1 / len(centers_init),
-            mean_precision_prior=mean_precision_prior,
+            weight_concentration_prior=1.0 / len(centers_init),
+            # mean_precision_prior=mean_precision_prior,
             covariance_prior=covariance_prior,
             init_params="centers",
             centers_init=centers_init.copy(),
@@ -380,6 +386,75 @@ def associate(
     return events, assignment
 
 
+# def init_centers(config, data_, locs_, time_range, max_num_event=1):
+#     """
+#     max_num_event: maximum number of events at one station
+#     """
+
+#     if "initial_points" in config:
+#         initial_points = config["initial_points"]
+#         if not isinstance(initial_points, list):
+#             initial_points = [initial_points, initial_points, initial_points]
+#     else:
+#         initial_points = [1, 1, 1]
+
+#     if (np.prod(initial_points) * max_num_event * config["oversample_factor"]) > len(data_):
+#         initial_points = [1, 1, 1]
+
+#     x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0] + 2)[1:-1]
+#     y_init = np.linspace(config["y(km)"][0], config["y(km)"][1], initial_points[1] + 2)[1:-1]
+#     z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2] + 2)[1:-1]
+#     # z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
+
+#     ## manually set initial points
+#     if "x_init" in config:
+#         x_init = np.array(config["x_init"])
+#     if "y_init" in config:
+#         y_init = np.array(config["y_init"])
+#     if "z_init" in config:
+#         z_init = np.array(config["z_init"])
+
+#     x_init = np.broadcast_to(x_init[:, np.newaxis, np.newaxis], initial_points).reshape(-1)
+#     y_init = np.broadcast_to(y_init[np.newaxis, :, np.newaxis], initial_points).reshape(-1)
+#     z_init = np.broadcast_to(z_init[np.newaxis, np.newaxis, :], initial_points).reshape(-1)
+
+#     ## I found it helpful to add a point at the center of the area
+#     if (initial_points[0] == 2) and (initial_points[1] == 2):
+#         x_init = np.append(x_init, np.mean(config["x(km)"]))
+#         y_init = np.append(y_init, np.mean(config["y(km)"]))
+#         z_init = np.append(z_init, 0)
+
+#     num_xyz_init = len(x_init)
+
+#     # num_sta = len(np.unique(locs_, axis=0))
+#     # num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
+#     # num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
+#     num_t_init = min(max(int(max_num_event * config["oversample_factor"]), 1), max(len(data_) // num_xyz_init, 1))
+#     t_init = np.sort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
+#     # t_init = np.linspace(
+#     #         data_[:, 0].min() - 0.1 * time_range,
+#     #         data_[:, 0].max() + 0.1 * time_range,
+#     #         num_t_init)
+
+#     x_init = np.broadcast_to(x_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
+#     y_init = np.broadcast_to(y_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
+#     z_init = np.broadcast_to(z_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
+#     t_init = np.broadcast_to(t_init[np.newaxis, :], (num_xyz_init, num_t_init)).reshape(-1)
+
+#     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
+#         centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
+#     elif config["dims"] == ["x(km)", "y(km)"]:
+#         centers_init = np.vstack([x_init, y_init, t_init]).T
+#     elif config["dims"] == ["x(km)"]:
+#         centers_init = np.vstack([x_init, t_init]).T
+#     else:
+#         raise (ValueError("Unsupported dims"))
+
+#     if config["use_amplitude"]:
+#         centers_init = np.hstack([centers_init, 1.0 * np.ones((len(centers_init), 1))])  # init magnitude to 1.0
+
+#     return centers_init
+
 def init_centers(config, data_, locs_, time_range, max_num_event=1):
     """
     max_num_event: maximum number of events at one station
@@ -392,48 +467,14 @@ def init_centers(config, data_, locs_, time_range, max_num_event=1):
     else:
         initial_points = [1, 1, 1]
 
-    if (np.prod(initial_points) * max_num_event * config["oversample_factor"]) > len(data_):
-        initial_points = [1, 1, 1]
-
-    x_init = np.linspace(config["x(km)"][0], config["x(km)"][1], initial_points[0] + 2)[1:-1]
-    y_init = np.linspace(config["y(km)"][0], config["y(km)"][1], initial_points[1] + 2)[1:-1]
+    num_t_init = min(max(int(max_num_event * config["oversample_factor"]), 1), len(data_))
+    index = np.argsort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
+    t_init = data_[index, 0]
+    x_init, y_init = np.mean(locs_[:, 0]), np.mean(locs_[:, 1])
     z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2] + 2)[1:-1]
-    # z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2]) + 1.0
-
-    ## manually set initial points
-    if "x_init" in config:
-        x_init = np.array(config["x_init"])
-    if "y_init" in config:
-        y_init = np.array(config["y_init"])
-    if "z_init" in config:
-        z_init = np.array(config["z_init"])
-
-    x_init = np.broadcast_to(x_init[:, np.newaxis, np.newaxis], initial_points).reshape(-1)
-    y_init = np.broadcast_to(y_init[np.newaxis, :, np.newaxis], initial_points).reshape(-1)
-    z_init = np.broadcast_to(z_init[np.newaxis, np.newaxis, :], initial_points).reshape(-1)
-
-    ## I found it helpful to add a point at the center of the area
-    if (initial_points[0] == 2) and (initial_points[1] == 2):
-        x_init = np.append(x_init, np.mean(config["x(km)"]))
-        y_init = np.append(y_init, np.mean(config["y(km)"]))
-        z_init = np.append(z_init, 0)
-
-    num_xyz_init = len(x_init)
-
-    # num_sta = len(np.unique(locs_, axis=0))
-    # num_t_init = max(np.round(len(data_) / num_sta / num_xyz_init * config["oversample_factor"]), 1)
-    # num_t_init = min(int(num_t_init), max(len(data_) // num_xyz_init, 1))
-    num_t_init = min(max(int(max_num_event * config["oversample_factor"]), 1), max(len(data_) // num_xyz_init, 1))
-    t_init = np.sort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
-    # t_init = np.linspace(
-    #         data_[:, 0].min() - 0.1 * time_range,
-    #         data_[:, 0].max() + 0.1 * time_range,
-    #         num_t_init)
-
-    x_init = np.broadcast_to(x_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
-    y_init = np.broadcast_to(y_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
-    z_init = np.broadcast_to(z_init[:, np.newaxis], (num_xyz_init, num_t_init)).reshape(-1)
-    t_init = np.broadcast_to(t_init[np.newaxis, :], (num_xyz_init, num_t_init)).reshape(-1)
+    x_init = np.broadcast_to(x_init, (num_t_init)).reshape(-1)
+    y_init = np.broadcast_to(y_init, (num_t_init)).reshape(-1)
+    z_init = np.broadcast_to(z_init, (num_t_init)).reshape(-1)
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
         centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
