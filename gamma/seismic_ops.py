@@ -188,7 +188,7 @@ def grad_traveltime(event_loc, station_loc, phase_type, eikonal):
     dt_dz[p_index] = _interp(eikonal["grad_up"][1], r[p_index], z[p_index], rgrid0, zgrid0, nr, nz, h)
     dt_dz[s_index] = _interp(eikonal["grad_us"][1], r[s_index], z[s_index], rgrid0, zgrid0, nr, nz, h)
 
-    dr_dxy = (event_loc[:, :-2] - station_loc[:, :-1]) / (r[:, np.newaxis] + 1e-6)
+    dr_dxy = (event_loc[:, :2] - station_loc[:, :2]) / (r[:, np.newaxis] + 1e-6)
     dt_dxy = dt_dr[:, np.newaxis] * dr_dxy
 
     grad = np.column_stack((dt_dxy, dt_dz[:, np.newaxis]))
