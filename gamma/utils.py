@@ -223,10 +223,24 @@ def associate(
         covariance_prior_pre = config["covariance_prior"]
     else:
         # covariance_prior_pre = [5.0, 2.0]
+        ## TODO: design a smark way to set covariance_prior
+        x_std = np.std(locs_[:, 0])
+        y_std = np.std(locs_[:, 1])
+        t_std = np.std(data_[:, 0])
+        # case 1
+        # scaler = max(np.sqrt(x_std**2 + y_std**2) / 6.0 , 0.1)
+        # case 2
+        # scaler = max(np.sqrt(x_std**2 + y_std**2) / 6.0 / t_std, 0.1) * 10
+        # case 3
+        d, v = 50, 6.0
+        scaler = max((np.exp(np.sqrt(x_std**2 + y_std**2)/d) - 1)/(np.exp(1) - 1) * d / v / t_std, 0.2) * 10
         if config["use_amplitude"]:
-            covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
+            # covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
+            covariance_prior_pre = [scaler, scaler]
         else:
-            covariance_prior_pre = [time_range * 10.0]
+            # covariance_prior_pre = [time_range * 10.0]
+            covariance_prior_pre = [scaler]
+    # print(f"covariance_prior_pre: {covariance_prior_pre}")
     if config["use_amplitude"]:
         covariance_prior = np.array([[covariance_prior_pre[0], 0.0], [0.0, covariance_prior_pre[1]]])
     else:
@@ -286,6 +300,7 @@ def associate(
         tmp_phase_type = phase_type_[pred == i]
         if (len(tmp_data) == 0) or (len(tmp_data) < config["min_picks_per_eq"]):
             continue
+        # idx_filter = np.ones(len(tmp_data)).astype(bool)
 
         ## filter by time
         t_ = calc_time(
@@ -468,12 +483,15 @@ def init_centers(config, data_, locs_, time_range, max_num_event=1):
         initial_points = [1, 1, 1]
 
     num_t_init = min(max(int(max_num_event * config["oversample_factor"]), 1), len(data_))
+    
     index = np.argsort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
     t_init = data_[index, 0]
-    x_init, y_init = np.mean(locs_[:, 0]), np.mean(locs_[:, 1])
+    x_init = locs_[:, 0][index]
+    y_init = locs_[:, 1][index]
+    # x_init, y_init = np.mean(locs_[:, 0]), np.mean(locs_[:, 1])
+    # x_init = np.broadcast_to(x_init, (num_t_init)).reshape(-1)
+    # y_init = np.broadcast_to(y_init, (num_t_init)).reshape(-1)
     z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2] + 2)[1:-1]
-    x_init = np.broadcast_to(x_init, (num_t_init)).reshape(-1)
-    y_init = np.broadcast_to(y_init, (num_t_init)).reshape(-1)
     z_init = np.broadcast_to(z_init, (num_t_init)).reshape(-1)
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
