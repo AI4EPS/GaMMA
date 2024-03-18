@@ -227,13 +227,16 @@ def associate(
         x_std = np.std(locs_[:, 0])
         y_std = np.std(locs_[:, 1])
         t_std = np.std(data_[:, 0])
-        # case 1
+        ## option 1
         # scaler = max(np.sqrt(x_std**2 + y_std**2) / 6.0 , 0.1)
-        # case 2
+        ## option 2
         # scaler = max(np.sqrt(x_std**2 + y_std**2) / 6.0 / t_std, 0.1) * 10
-        # case 3
-        d, v = 50, 6.0
-        scaler = max((np.exp(np.sqrt(x_std**2 + y_std**2)/d) - 1)/(np.exp(1) - 1) * d / v / t_std, 0.2) * 10
+        ## option 3
+        # d, v = 50, 6.0
+        # scaler = max((np.exp(np.sqrt(x_std**2 + y_std**2)/d) - 1)/(np.exp(1) - 1) * d / v / t_std, 0.2) * 10
+        ## option 4
+        rstd = np.sqrt(x_std**2 + y_std**2)
+        scaler = max(10.0, (rstd/6.0)*(rstd/60.0)) # 6.0 km/s, 60 km
         if config["use_amplitude"]:
             # covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
             covariance_prior_pre = [scaler, scaler]
