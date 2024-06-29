@@ -68,6 +68,54 @@ def convert_picks_csv(picks, stations, config):
         timestamp0,
     )
 
+from pyproj import Proj
+def generate_virtual_picks(config, t_start, t_end, pick_interval=14.1, v=6.0):
+    proj = Proj(f"+proj=sterea +lon_0={config['longitude0']} +lat_0={config['latitude0']} +units=km")
+    added_lon = np.array(
+        [-122.82414652, -122.95262168, -122.37010843, -122.12919507,
+       -122.02831026, -121.7408374 , -121.44178241, -121.43578306,
+       -121.13691749, -121.14092716, -120.85093316, -120.8482852 ,
+       -120.61727685, -120.55754466, -122.52978781, -123.08575001,
+       -121.06983387, -123.73116629, -123.77364856, -123.46086107,
+       -123.12292307, -122.98747986, -122.74199062, -120.5       ,
+       -120.61181805, -120.16376028, -120.05377491, -119.71912299,
+       -119.72273531, -119.39093763, -119.56159317, -120.09566786,
+       -120.04413004, -119.98432876, -119.87620299, -119.69317441,
+       -119.52926792, -119.35415746, -119.25843591, -119.15039916,
+       -118.91953095, -118.81508146, -118.64005703, -118.65317244,
+       -118.50068618, -118.40118374, -118.72974964, -118.50167475,
+       -118.21900452, -119.69835168, -117.75963681, -117.4241694 ,
+       -120.953675  ]
+    )
+    added_lat = np.array(
+        [39.49946678, 39.8569939 , 39.91253099, 39.60099814, 40.32237081,
+       40.68558211, 40.41839871, 39.96849462, 39.25028619, 39.70040776,
+       39.97164021, 39.43154741, 40.15209149, 38.8017273 , 41.39434133,
+       40.304205  , 38.07980305, 41.54789604, 41.18704828, 40.83537571,
+       41.29294593, 40.84612492, 40.58107511, 37.09010754, 36.63950457,
+       36.81930455, 36.45849048, 36.45675922, 36.09631963, 36.00356277,
+       35.6445694 , 37.19399106, 38.08029438, 38.48539883, 37.71917559,
+       38.08412928, 37.54235371, 37.89547409, 37.35393146, 37.08243587,
+       37.26541959, 36.9880404 , 37.2557514 , 36.71529466, 36.98316024,
+       36.43736513, 35.81529587, 36.08202335, 36.25715685, 38.43878105,
+       35.07589211, 35.24788274, 37.71994667]
+    )
+    added_x = proj(added_lon, added_lat)[0]
+    added_y = proj(added_lon, added_lat)[1]
+    virtual_pick_x = []
+    virtual_pick_y = []
+    virtual_pick_t = []
+    pick_interval = 14.1
+    # virtual_t_num = int((raw_picks['t'].max() - raw_picks['t'].min())//pick_interval)
+    for x, y in zip(added_x, added_y):
+        # start_time = np.random.uniform(raw_picks['t'].min(), raw_picks['t'].min() + pick_interval, size=1)
+        virtual_pick_t.extend(np.arange(t_start, t_end, pick_interval))
+        virtual_pick_x.extend([x]*len(np.arange(t_start, t_end, pick_interval)))
+        virtual_pick_y.extend([y]*len(np.arange(t_start, t_end, pick_interval)))
+    virtual_pick_x = np.array(virtual_pick_x)
+    virtual_pick_y = np.array(virtual_pick_y)
+    virtual_pick_t = np.array(virtual_pick_t)
+    return np.array([virtual_pick_t, virtual_pick_x/v, virtual_pick_y/v]).T
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
@@ -85,10 +133,30 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     if ("use_dbscan" in config) and config["use_dbscan"]:
         # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(data[:, 0:1])
-        db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-            np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])])
+
+        eps = 13
+        min_sample = 9
+        vel = np.average(vel["p"])
+        dbscan_data = np.hstack([data[:, 0:1], locs[:, :2] / np.array([vel, vel])])
+
+        use_phase_score = True
+        add_vitual_picks = True
+
+        keep_data = np.ones(len(data))
+        pick_weights = picks['phase_score'].values
+
+        if add_vitual_picks:
+            virtual_data = generate_virtual_picks(config, data[:, 0:1].min(), data[:, 0:1].max(), pick_interval=14, v=vel)
+            print(np.shape(virtual_data), np.shape(dbscan_data))
+            dbscan_data = np.vstack([dbscan_data, virtual_data])
+            keep_data = np.append(keep_data, np.zeros(len(virtual_data)))
+            pick_weights = np.append(pick_weights, 0.8*np.ones(len(virtual_data)))
+        db = DBSCAN(eps=eps, min_samples=min_sample).fit(
+            dbscan_data,
+            sample_weight=pick_weights if use_phase_score else None
         )
         labels = db.labels_
+        labels = labels[keep_data == 1]
         unique_labels = set(labels)
         unique_labels = unique_labels.difference([-1])
     else:
@@ -227,6 +295,10 @@ def associate(
         x_std = np.std(locs_[:, 0])
         y_std = np.std(locs_[:, 1])
         t_std = np.std(data_[:, 0])
+        rstd = np.sqrt(x_std**2 + y_std**2)
+        amp_std = np.std(np.log(10**data_[:, 1]))
+        # print(f"amp_std: {amp_std}")
+        # use amplitude
         ## option 1
         # scaler = max(np.sqrt(x_std**2 + y_std**2) / 6.0 , 0.1)
         ## option 2
@@ -235,8 +307,10 @@ def associate(
         # d, v = 50, 6.0
         # scaler = max((np.exp(np.sqrt(x_std**2 + y_std**2)/d) - 1)/(np.exp(1) - 1) * d / v / t_std, 0.2) * 10
         ## option 4
-        rstd = np.sqrt(x_std**2 + y_std**2)
-        scaler = max(10.0, (rstd/6.0)*(rstd/60.0)) # 6.0 km/s, 60 km
+        scaler1 = max(10.0, (rstd/6.0)*(rstd/60.0)) # 6.0 km/s, 60 km
+        scaler = scaler1
+        # scaler2 = min(max(10.0, np.exp(amp_std-2.5) * 10**(amp_std)), 440)
+        # scaler = min(scaler1, scaler2)
         if config["use_amplitude"]:
             # covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
             covariance_prior_pre = [scaler, scaler]
