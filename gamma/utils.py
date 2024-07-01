@@ -86,7 +86,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     if ("use_dbscan" in config) and config["use_dbscan"]:
         # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(data[:, 0:1])
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-            np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])])
+            np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"]) / np.array([3.0, 1.0])]),
+            sample_weight=np.squeeze(phase_weight),
         )
         labels = db.labels_
         unique_labels = set(labels)
@@ -236,7 +237,7 @@ def associate(
         # scaler = max((np.exp(np.sqrt(x_std**2 + y_std**2)/d) - 1)/(np.exp(1) - 1) * d / v / t_std, 0.2) * 10
         ## option 4
         rstd = np.sqrt(x_std**2 + y_std**2)
-        scaler = max(10.0, (rstd/6.0)*(rstd/60.0)) # 6.0 km/s, 60 km
+        scaler = max(10.0, (rstd / 6.0) * (rstd / 60.0))  # 6.0 km/s, 60 km
         if config["use_amplitude"]:
             # covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
             covariance_prior_pre = [scaler, scaler]
@@ -473,6 +474,7 @@ def associate(
 
 #     return centers_init
 
+
 def init_centers(config, data_, locs_, time_range, max_num_event=1):
     """
     max_num_event: maximum number of events at one station
@@ -486,7 +488,7 @@ def init_centers(config, data_, locs_, time_range, max_num_event=1):
         initial_points = [1, 1, 1]
 
     num_t_init = min(max(int(max_num_event * config["oversample_factor"]), 1), len(data_))
-    
+
     index = np.argsort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
     t_init = data_[index, 0]
     x_init = locs_[:, 0][index]
