@@ -118,10 +118,12 @@ def test_get_index():
 
 @njit
 def _interp(time_table, r, z, rgrid0, zgrid0, nr, nz, h):
-    # ir0 = np.floor((r - rgrid0) / h).clip(0, nr - 2).astype(np.int64)
-    # iz0 = np.floor((z - zgrid0) / h).clip(0, nz - 2).astype(np.int64)
-    ir0 = ((r - rgrid0) / h).astype(np.int64)
-    iz0 = ((z - zgrid0) / h).astype(np.int64)
+    ir0 = np.floor((r - rgrid0) / h).clip(0, nr - 2).astype(np.int64)
+    iz0 = np.floor((z - zgrid0) / h).clip(0, nz - 2).astype(np.int64)
+    r = r.clip(rgrid0, rgrid0 + (nr - 1) * h)
+    z = z.clip(zgrid0, zgrid0 + (nz - 1) * h)
+    # ir0 = ((r - rgrid0) / h).astype(np.int64)
+    # iz0 = ((z - zgrid0) / h).astype(np.int64)
     ir1 = ir0 + 1
     iz1 = iz0 + 1
 
