@@ -85,12 +85,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     if ("use_dbscan" in config) and config["use_dbscan"]:
         # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(data[:, 0:1])
-        # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-        #     np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])]),
-        #     sample_weight=np.squeeze(phase_weight),
-        # )
         db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-            np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"]) / np.array([3.0, 1.0])]),
+            np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])]),
             sample_weight=np.squeeze(phase_weight),
         )
 
@@ -248,7 +244,7 @@ def associate(
         ## option 4
         rstd = np.sqrt(x_std**2 + y_std**2)
         # scaler = max(10.0, (rstd / 6.0) * (rstd / 60.0))  # 6.0 km/s, 60 km
-        scaler = max(1.0, (rstd / 6.0) * (rstd / 15.0))  # 6.0 km/s, 60 km
+        scaler = max(1.0, (rstd / 6.0) * (rstd / 6.0))  # 6.0 km/s, 6 km
         if config["use_amplitude"]:
             # covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
             covariance_prior_pre = [scaler, scaler]
