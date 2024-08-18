@@ -9,7 +9,7 @@ app = FastAPI()
 
 @app.get("/")
 def greet_json():
-    return {"message": "Hello, World!"}
+    return {"message": "Hello, GaMMA!"}
 
 
 @app.post("/predict/")
@@ -20,10 +20,12 @@ def predict(picks: dict, stations: dict, config: dict):
     picks["phase_time"] = pd.to_datetime(picks["phase_time"])
     stations = pd.DataFrame(stations)
     events_, picks_ = run_gamma(picks, stations, config)
-    picks_ = picks_.to_dict(orient="records")
+    if events_ is None:
+        return {"events": None, "picks": picks_}
     events_ = events_.to_dict(orient="records")
+    picks_ = picks_.to_dict(orient="records")
 
-    return {"picks": picks_, "events": events_}
+    return {"events": events_, "picks": picks_}
 
 
 def set_config(region="ridgecrest"):
@@ -123,13 +125,16 @@ def run_gamma(picks, stations, config_):
             "phase_amplitude": "amp",
         }
     )
+    stations = stations.rename(columns={"station_id": "id"})
     stations[["x(km)", "y(km)"]] = stations.apply(
         lambda x: pd.Series(proj(longitude=x.longitude, latitude=x.latitude)), axis=1
     )
     stations["z(km)"] = stations["elevation_m"].apply(lambda x: -x / 1e3)
-    stations = stations.rename(columns={"station_id": "id"})
 
     events, assignments = association(picks, stations, config, 0, config["method"])
+
+    if events is None:
+        return None, None
 
     events = pd.DataFrame(events)
     events[["longitude", "latitude"]] = events.apply(
