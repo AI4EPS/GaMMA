@@ -1,12 +1,5 @@
-import os
-from json import dumps
-from typing import Dict, List, Union
-
-import numpy as np
 import pandas as pd
 from fastapi import FastAPI
-from kafka import KafkaProducer
-from pydantic import BaseModel
 from pyproj import Proj
 
 from gamma.utils import association
