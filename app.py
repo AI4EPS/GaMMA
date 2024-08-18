@@ -51,7 +51,7 @@ def set_config(region="ridgecrest"):
                 "minlatitude": 35.205,
                 "maxlatitude": 36.205,
                 "mindepth_km": 0.0,
-                "maxdepth_km": 30.0,
+                "maxdepth_km": 41.0,
             }
         )
 
@@ -70,6 +70,7 @@ def set_config(region="ridgecrest"):
             "xlim_km": xlim_km,
             "ylim_km": ylim_km,
             "zlim_km": zlim_km,
+            "z(km)": zlim_km,
             "proj": proj,
         }
     )
