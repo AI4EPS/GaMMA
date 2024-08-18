@@ -19,7 +19,6 @@ def predict(picks: dict, stations: dict, config: dict):
     picks = pd.DataFrame(picks)
     picks["phase_time"] = pd.to_datetime(picks["phase_time"])
     stations = pd.DataFrame(stations)
-    print(stations)
     events_, picks_ = run_gamma(picks, stations, config)
     picks_ = picks_.to_dict(orient="records")
     events_ = events_.to_dict(orient="records")
@@ -132,7 +131,6 @@ def run_gamma(picks, stations, config_):
 
     events, assignments = association(picks, stations, config, 0, config["method"])
 
-    print(events)
     events = pd.DataFrame(events)
     events[["longitude", "latitude"]] = events.apply(
         lambda x: pd.Series(proj(longitude=x["x(km)"], latitude=x["y(km)"], inverse=True)), axis=1
