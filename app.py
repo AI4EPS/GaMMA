@@ -9,7 +9,7 @@ app = FastAPI()
 
 @app.get("/")
 def greet_json():
-    return {"message": "Hello, GaMMA!"}
+    return {"Hello": "GaMMA!"}
 
 
 @app.post("/predict/")
