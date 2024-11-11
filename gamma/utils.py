@@ -369,7 +369,9 @@ def associate(
         tmp_locs = locs_[pred == i]
         tmp_pick_station_id = pick_station_id_[pred == i]
         tmp_phase_type = phase_type_[pred == i]
+        # tmp_phase_weight = phase_weight_[pred == i]
         if (len(tmp_data) == 0) or (len(tmp_data) < config["min_picks_per_eq"]):
+            # if (len(tmp_data) == 0) or (np.sum(tmp_phase_weight) < config["min_picks_per_eq"]):
             continue
         # idx_filter = np.ones(len(tmp_data)).astype(bool)
 
@@ -385,6 +387,7 @@ def associate(
         idx_t = (diff_t < config["max_sigma11"]).squeeze(axis=1)
         idx_filter = idx_t
         if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
+            # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
             continue
 
         ## filter multiple picks at the same station
@@ -397,6 +400,7 @@ def associate(
             idx_s[unique_sta_id[k][0]] = True
         idx_filter = idx_filter & idx_s
         if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
+            # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
             continue
         gmm.covariances_[i, 0, 0] = np.mean((diff_t[idx_t]) ** 2)
 
@@ -411,21 +415,25 @@ def associate(
             idx_a = (diff_a < config["max_sigma22"]).squeeze()
             idx_filter = idx_filter & idx_a
             if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
+                # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
                 continue
 
             if "max_sigma12" in config:
                 idx_cov = np.abs(gmm.covariances_[i, 0, 1]) < config["max_sigma12"]
                 idx_filter = idx_filter & idx_cov
                 if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
+                    # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
                     continue
 
             gmm.covariances_[i, 1, 1] = np.mean((diff_a[idx_a]) ** 2)
 
         if "min_p_picks_per_eq" in config:
             if len(tmp_data[idx_filter & (tmp_phase_type == "p")]) < config["min_p_picks_per_eq"]:
+                # if np.sum(tmp_phase_weight[idx_filter & (tmp_phase_type == "p")]) < config["min_p_picks_per_eq"]:
                 continue
         if "min_s_picks_per_eq" in config:
             if len(tmp_data[idx_filter & (tmp_phase_type == "s")]) < config["min_s_picks_per_eq"]:
+                # if np.sum(tmp_phase_weight[idx_filter & (tmp_phase_type == "s")]) < config["min_s_picks_per_eq"]:
                 continue
 
         if lock is not None:
