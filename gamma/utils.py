@@ -113,7 +113,7 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
             labels_ = np.where(labels_ == -1, -1, labels_ + current_label)
             labels[idx] = labels_
 
-            current_label += labels_.max() + 1
+            current_label = labels_.max() + 1
             keep_split = True
 
         if not keep_split:
