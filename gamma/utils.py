@@ -22,7 +22,13 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:
 def estimate_eps(stations, vp, sigma=3.0):
     X = stations[["x(km)", "y(km)", "z(km)"]].values
     D = np.sqrt(((X[:, np.newaxis, :] - X[np.newaxis, :, :]) ** 2).sum(axis=-1))
-    Tcsr = minimum_spanning_tree(D).toarray()
+
+    dist = np.sort(D, axis=1)[:, 3]
+    dist = np.max(dist)
+
+    eps = dist / vp * 1.5
+
+    # Tcsr = minimum_spanning_tree(D).toarray()
 
     # Tcsr = Tcsr[Tcsr > 0]
     # # mean = np.median(Tcsr)
@@ -30,7 +36,7 @@ def estimate_eps(stations, vp, sigma=3.0):
     # std = np.std(Tcsr)
     # eps = (mean + sigma * std) / vp
 
-    eps = np.max(Tcsr) / vp * 1.5
+    # eps = np.max(Tcsr) / vp * 1.5
 
     return eps
 
@@ -72,10 +78,8 @@ def convert_picks_csv(picks, stations, config):
 def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, vel, eps=15, min_samples=3):
 
     def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
-
-        data = np.hstack([t * ratio, xy / vel["p"]])  # time, x, y
-        db_ = DBSCAN(eps=eps, min_samples=min_samples).fit(data, sample_weight=np.squeeze(w, axis=-1))
-
+        data = np.hstack([t, xy / vel["p"]])  # time, x, y
+        db_ = DBSCAN(eps=eps*ratio, min_samples=min_samples).fit(data, sample_weight=np.squeeze(w, axis=-1))
         return db_.labels_
 
     db = DBSCAN(eps=eps, min_samples=min_samples).fit(
@@ -88,9 +92,9 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
     current_label = labels.max() + 1
     ratio = 1
 
-    for _ in range(20):
+    for _ in range(50):
 
-        ratio *= 1.5
+        ratio /= 1.2
         unique_labels = np.unique(labels)
         current_label = unique_labels.max() + 1
         keep_split = False
@@ -102,12 +106,19 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
 
             idx = labels == label
             t = data[idx, 0:1]
-            if (t.max() - t.min()) < 800:  # s
-                continue
-
             xy = phase_loc[idx, :2]
             w = phase_weight[idx]
             ph = phase_type[idx]
+
+            if len(t) < 100:
+                continue
+            
+            dxy = xy.max(axis=0) - xy.min(axis=0)
+            dt = np.linalg.norm(dxy) / vel["p"] * 15
+            if (t.max() - t.min()) < dt:  # s
+                continue
+            else:
+                print(f"Splitting {len(t)} picks using eps={eps * ratio:.2f}")
 
             labels_ = dbscan2(t, xy, w, ph, vel, eps=eps, min_samples=min_samples, ratio=ratio)
             labels_ = np.where(labels_ == -1, -1, labels_ + current_label)
