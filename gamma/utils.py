@@ -19,14 +19,19 @@ from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:
 
 
 # def estimate_station_spacing(stations):
-def estimate_eps(stations, vp, sigma=3.0):
+def estimate_eps(stations, vp, sigma=2.0):
     X = stations[["x(km)", "y(km)", "z(km)"]].values
     D = np.sqrt(((X[:, np.newaxis, :] - X[np.newaxis, :, :]) ** 2).sum(axis=-1))
 
-    dist = np.sort(D, axis=1)[:, 3]
-    dist = np.max(dist)
+    D[D == 0] = np.inf
+    dist = np.sort(D, axis=1)[:, 1]
+    # dist = np.max(dist)
+    
+    std = np.std(dist)
+    dist = np.mean(dist) + sigma * std
 
     eps = dist / vp * 1.5
+    
 
     # Tcsr = minimum_spanning_tree(D).toarray()
 
@@ -79,10 +84,10 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
 
     def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
         data = np.hstack([t, xy / vel["p"]])  # time, x, y
-        db_ = DBSCAN(eps=eps*ratio, min_samples=min_samples).fit(data, sample_weight=np.squeeze(w, axis=-1))
+        db_ = DBSCAN(eps=eps*ratio, min_samples=min_samples, n_jobs=-1).fit(data, sample_weight=np.squeeze(w, axis=-1))
         return db_.labels_
 
-    db = DBSCAN(eps=eps, min_samples=min_samples).fit(
+    db = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(
         np.hstack([data[:, 0:1], phase_loc[:, :2] / vel["p"]]),  # time, x, y
         sample_weight=np.squeeze(phase_weight, axis=-1),
     )
