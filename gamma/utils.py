@@ -451,6 +451,10 @@ def associate(
             if len(tmp_data[idx_filter & (tmp_phase_type == "s")]) < config["min_s_picks_per_eq"]:
                 # if np.sum(tmp_phase_weight[idx_filter & (tmp_phase_type == "s")]) < config["min_s_picks_per_eq"]:
                 continue
+        if "min_stations" in config:
+            if len(np.unique(tmp_locs[idx_filter], axis=0)) < config["min_stations"]:
+                continue
+
 
         if lock is not None:
             with lock:
