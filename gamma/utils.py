@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.sparse.csgraph import minimum_spanning_tree
 from sklearn.cluster import DBSCAN
+from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
@@ -26,12 +27,11 @@ def estimate_eps(stations, vp, sigma=2.0):
     D[D == 0] = np.inf
     dist = np.sort(D, axis=1)[:, 1]
     # dist = np.max(dist)
-    
+
     std = np.std(dist)
     dist = np.mean(dist) + sigma * std
 
     eps = dist / vp * 1.5
-    
 
     # Tcsr = minimum_spanning_tree(D).toarray()
 
@@ -84,7 +84,7 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
 
     def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
         data = np.hstack([t, xy / vel["p"]])  # time, x, y
-        db_ = DBSCAN(eps=eps*ratio, min_samples=min_samples, n_jobs=-1).fit(data, sample_weight=np.squeeze(w, axis=-1))
+        db_ = DBSCAN(eps=eps * ratio, min_samples=min_samples).fit(data, sample_weight=np.squeeze(w, axis=-1))
         return db_.labels_
 
     db = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(
@@ -104,20 +104,20 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
         current_label = unique_labels.max() + 1
         keep_split = False
 
-        for label in unique_labels:
+        for label in tqdm(unique_labels, desc="Clustering"):
 
             if label == -1:
                 continue
 
             idx = labels == label
+            if np.sum(idx) < 500:
+                continue
+
             t = data[idx, 0:1]
             xy = phase_loc[idx, :2]
             w = phase_weight[idx]
             ph = phase_type[idx]
 
-            if len(t) < 100:
-                continue
-            
             dxy = xy.max(axis=0) - xy.min(axis=0)
             dt = np.linalg.norm(dxy) / vel["p"] * 15
             if (t.max() - t.min()) < dt:  # s
@@ -454,7 +454,6 @@ def associate(
         if "min_stations" in config:
             if len(np.unique(tmp_locs[idx_filter], axis=0)) < config["min_stations"]:
                 continue
-
 
         if lock is not None:
             with lock:
