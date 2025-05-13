@@ -592,7 +592,7 @@ def init_centers(config, data_, locs_, time_range, max_num_event=1):
     # x_init = np.broadcast_to(x_init, (num_t_init)).reshape(-1)
     # y_init = np.broadcast_to(y_init, (num_t_init)).reshape(-1)
     z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2] + 2)[1:-1]
-    z_init = np.broadcast_to(z_init, (num_t_init)).reshape(-1)
+    z_init = np.tile(z_init, num_t_init)[:num_t_init]
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
         centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
