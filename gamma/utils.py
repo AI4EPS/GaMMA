@@ -517,16 +517,17 @@ def associate(
 
             finally:
                 # Clean up temporary arrays in the loop
-                del tmp_data, tmp_locs, tmp_pick_station_id, tmp_phase_type, mask, mask_i
+                del tmp_data, tmp_locs, tmp_pick_station_id, tmp_phase_type, mask
                 if config["use_amplitude"] and 'a_' in locals():
-                    del a_, diff_a
-                del t_, diff_t, idx_t, idx_s, idx_filter, idx_a
+                    del a_, diff_a, idx_a
+                if 't_' in locals():
+                    del t_, diff_t, idx_t, idx_s, idx_filter
 
         return events, assignment
 
     finally:
         # Clean up filtered arrays
-        del data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_id_, centers_init
+        del data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_id_
 
 
 # def init_centers(config, data_, locs_, time_range, max_num_event=1):
