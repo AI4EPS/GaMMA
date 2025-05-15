@@ -505,28 +505,31 @@ def associate(
                     "num_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
                     "event_index": event_idx_value,
                 }
+                
                 for j, k in enumerate(config["dims"]):  ## add location
                     event[k] = gmm.centers_[i, j]
                 events.append(event)
 
-                for pi, pr in zip(pick_idx_[mask_i][idx_filter], prob):
-                    assignment.append((pi, event_idx_value, pr))
+                filtered_pick_idx = pick_idx_[mask_i][idx_filter]
+                assignment.extend(zip(filtered_pick_idx, [event_idx_value] * len(filtered_pick_idx), prob))
+                # for pi, pr in zip(pick_idx_[mask_i][idx_filter], prob):
+                #     assignment.append((pi, event_idx_value, pr))
 
                 if (event_idx_value + 1) % 100 == 0:
                     print(f"\nAssociated {event_idx_value + 1} events")
 
             finally:
                 # Clean up temporary arrays in the loop
-                del tmp_data, tmp_locs, tmp_pick_station_id, tmp_phase_type, mask
+                del tmp_data, tmp_locs, tmp_pick_station_id, tmp_phase_type
                 if config["use_amplitude"] and 'a_' in locals():
                     del a_, diff_a, idx_a
                 if 't_' in locals():
-                    del t_, diff_t, idx_t, idx_s, idx_filter
+                    del t_, diff_t, idx_t, idx_filter
 
         return events, assignment
 
     finally:
-        # Clean up filtered arrays
+        # Release large arrays
         del data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_id_
 
 
