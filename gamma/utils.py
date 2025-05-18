@@ -1,5 +1,6 @@
 import multiprocessing as mp
 import platform
+import time
 from collections import Counter
 from datetime import datetime
 
@@ -78,6 +79,35 @@ def convert_picks_csv(picks, stations, config):
         pick_station_id[~nan_idx],
         timestamp0,
     )
+
+
+class LockWithTimeout:
+    def __init__(self, lock, timeout=5 * 60, max_hold_time=5 * 60):
+        self.lock = lock
+        self.timeout = timeout
+        self.max_hold_time = max_hold_time
+        self.acquired = False
+        self.hold_start_time = None
+
+    def __enter__(self):
+        start_time = time.time()
+        while time.time() - start_time < self.timeout:
+            try:
+                if self.lock.acquire():
+                    self.acquired = True
+                    self.hold_start_time = time.time()
+                    return self
+            except:
+                pass
+            time.sleep(0.1)
+        return None
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.acquired:
+            if time.time() - self.hold_start_time > self.max_hold_time:
+                print(f"\nLock held too long ({time.time() - self.hold_start_time:.1f}s), releasing")
+            self.lock.release()
+            self.acquired = False
 
 
 def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, vel, eps=15, min_samples=3):
@@ -474,7 +504,11 @@ def associate(
 
 
                 if lock is not None:
-                    with lock:
+                    with LockWithTimeout(lock) as lock_with_timeout:
+                        if lock_with_timeout is None:
+                            print(f"\nFailed to acquire lock for cluster {k}, skipping event")
+                            continue
+
                         if not isinstance(event_idx, int):
                             event_idx.value += 1
                             event_idx_value = event_idx.value
@@ -531,6 +565,12 @@ def associate(
     finally:
         # Release large arrays
         del data_, locs_, phase_type_, phase_weight_, pick_idx_, pick_station_id_
+        for var in ['pred', 'prob', 'prob_matrix', 'prob_eq', 'gmm']:
+            try:
+                del locals()[var]
+            except KeyError:
+                pass
+
 
 
 # def init_centers(config, data_, locs_, time_range, max_num_event=1):
