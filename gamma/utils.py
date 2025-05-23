@@ -110,6 +110,33 @@ class LockWithTimeout:
             self.acquired = False
 
 
+def job_distribution(labels, ncpu, chunk_size):
+    # for extreme cases, heavy clusters are processed late, causing all other CPUs idle
+    # give high priority to heavy clusters by sorting them first to reduce the CPU idle time
+    label_counts = Counter(labels)
+    unique_labels = sorted(set(labels).difference([-1]), key=lambda x: -label_counts[x])
+    
+    # If we have few labels or small chunks, just shuffle and return
+    if len(unique_labels) <= ncpu * chunk_size or chunk_size <= 2:
+        np.random.shuffle(unique_labels)
+        return unique_labels
+
+    heavy_jobs = unique_labels[:ncpu * 2]
+    remaining_jobs = unique_labels[ncpu * 2:]
+    np.random.shuffle(remaining_jobs)
+    unique_labels = []
+    remaining_per_cpu = chunk_size - 2
+    for i in range(ncpu):
+        tmp = [heavy_jobs[i], heavy_jobs[ncpu * 2 - i - 1]]
+        start_idx = i * remaining_per_cpu
+        end_idx = start_idx + remaining_per_cpu
+        tmp.extend(remaining_jobs[start_idx:end_idx])
+        np.random.shuffle(tmp)
+        unique_labels.extend(tmp)
+    unique_labels.extend(remaining_jobs[ncpu * remaining_per_cpu:])
+    return unique_labels
+
+
 def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, vel, eps=15, min_samples=3):
 
     def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
@@ -244,12 +271,13 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
 
             # the following sort and shuffle is to make sure jobs are distributed evenly
-            counter = Counter(labels)
-            unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
-            np.random.shuffle(unique_labels)
+            # counter = Counter(labels)
+            # unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
+            # np.random.shuffle(unique_labels)
 
             # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
             chunk_size = min(max(len(unique_labels) // (config["ncpu"] * 20), 1), 200)
+            unique_labels = job_distribution(labels, config["ncpu"], chunk_size)
 
             # Check for OS to start a child process in multiprocessing
             # https://superfastpython.com/multiprocessing-context-in-python/
