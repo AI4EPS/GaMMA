@@ -249,7 +249,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             np.random.shuffle(unique_labels)
 
             # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
-            chunk_size = max(len(unique_labels) // (config["ncpu"] * 20), 1)
+            chunk_size = min(max(len(unique_labels) // (config["ncpu"] * 20), 1), 200)
 
             # Check for OS to start a child process in multiprocessing
             # https://superfastpython.com/multiprocessing-context-in-python/
