@@ -80,7 +80,9 @@ def convert_picks_csv(picks, stations, config):
     )
 
 
-def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, vel, eps=15, min_samples=3):
+def hierarchical_dbscan_clustering(
+    data, phase_loc, phase_type, phase_weight, vel, eps=15, min_samples=3, min_cluster_size=500, max_time_space_ratio=10
+):
 
     def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
         data = np.hstack([t, xy / vel["p"]])  # time, x, y
@@ -104,13 +106,13 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
         current_label = unique_labels.max() + 1
         keep_split = False
 
-        for label in tqdm(unique_labels, desc="Clustering"):
+        for label in tqdm(unique_labels, desc=f"Clustering (eps={eps * ratio:.2f})"):
 
             if label == -1:
                 continue
 
             idx = labels == label
-            if np.sum(idx) < 500:
+            if np.sum(idx) < min_cluster_size:
                 continue
 
             t = data[idx, 0:1]
@@ -118,12 +120,12 @@ def hierarchical_dbscan_clustering(data, phase_loc, phase_type, phase_weight, ve
             w = phase_weight[idx]
             ph = phase_type[idx]
 
-            dxy = xy.max(axis=0) - xy.min(axis=0)
-            dt = np.linalg.norm(dxy) / vel["p"] * 15
-            if (t.max() - t.min()) < dt:  # s
+            dxy = np.linalg.norm(xy.max(axis=0) - xy.min(axis=0))
+            dt = t.max() - t.min()
+            if dt < dxy / vel["p"] * max_time_space_ratio:  # s
                 continue
-            else:
-                print(f"Splitting {len(t)} picks using eps={eps * ratio:.2f}")
+            # else:
+            #     print(f"Splitting {len(t)} picks using eps={eps * ratio:.2f}")
 
             labels_ = dbscan2(t, xy, w, ph, vel, eps=eps, min_samples=min_samples, ratio=ratio)
             labels_ = np.where(labels_ == -1, -1, labels_ + current_label)
@@ -166,6 +168,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             vel,
             eps=config["dbscan_eps"],
             min_samples=config["dbscan_min_samples"],
+            min_cluster_size=config["dbscan_min_cluster_size"] if "dbscan_min_cluster_size" in config else 500,
+            max_time_space_ratio=(
+                config["dbscan_max_time_space_ratio"] if "dbscan_max_time_space_ratio" in config else 10
+            ),
         )
         unique_labels = set(labels)
         unique_labels = unique_labels.difference([-1])
