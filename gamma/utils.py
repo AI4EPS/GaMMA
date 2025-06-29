@@ -86,7 +86,7 @@ def hierarchical_dbscan_clustering(
 
     def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
         data = np.hstack([t, xy / vel["p"]])  # time, x, y
-        db_ = DBSCAN(eps=eps * ratio, min_samples=min_samples).fit(data, sample_weight=np.squeeze(w, axis=-1))
+        db_ = DBSCAN(eps=eps * ratio, min_samples=min_samples, n_jobs=-1).fit(data, sample_weight=np.squeeze(w, axis=-1))
         return db_.labels_
 
     db = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(
@@ -289,17 +289,18 @@ def associate(
     pick_idx_ = pick_idx[labels == k]
     pick_station_id_ = pick_station_id[labels == k]
 
-    max_num_event = max(Counter(pick_station_id_).values())
+    max_num_event = max(Counter(pick_station_id_).values()) * config["oversample_factor"]
+    max_num_event = min(max_num_event, len(data_)//3)
 
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
         return [], []
 
-    time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
-    if config["use_amplitude"]:
-        amp_range = max(data_[:, 1].max() - data_[:, 1].min(), 1)
+    # time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
+    # if config["use_amplitude"]:
+    #     amp_range = max(data_[:, 1].max() - data_[:, 1].min(), 1)
 
-    ## initialization with [1,1,1] horizontal points and N time points
-    centers_init = init_centers(config, data_, locs_, time_range, max_num_event)
+    # ## initialization with [1,1,1] horizontal points and N time points
+    # centers_init = init_centers(config, data_, locs_, time_range, max_num_event)
 
     ## run clustering
     # mean_precision_prior = 0.01 / time_range
@@ -342,12 +343,14 @@ def associate(
 
     if method == "BGMM":
         gmm = BayesianGaussianMixture(
-            n_components=len(centers_init),
-            weight_concentration_prior=1.0 / len(centers_init),
+            n_components=max_num_event,
+            weight_concentration_prior=1.0 / max_num_event,
             # mean_precision_prior=mean_precision_prior,
             covariance_prior=covariance_prior,
-            init_params="centers",
-            centers_init=centers_init.copy(),
+            # init_params="k-means++",
+            init_params="kmeans",
+            # init_params="centers",
+            # centers_init=centers_init.copy(),
             station_locs=locs_,
             phase_type=phase_type_,
             phase_weight=phase_weight_,
@@ -357,18 +360,20 @@ def associate(
         ).fit(data_)
     elif method == "GMM":
         gmm = GaussianMixture(
-            n_components=len(centers_init) + 1,
-            init_params="centers",
-            centers_init=centers_init.copy(),
+            n_components=max_num_event,
+            # init_params="k-means++",
+            init_params="kmeans",
+            # init_params="centers",
+            # centers_init=centers_init.copy(),
             station_locs=locs_,
             phase_type=phase_type_,
             phase_weight=phase_weight_,
             vel=vel,
             eikonal=config["eikonal"],
             bounds=config["bfgs_bounds"],
-            dummy_comp=True,
-            dummy_prob=1 / (1 * np.sqrt(2 * np.pi)) * np.exp(-1 / 2),
-            dummy_quantile=0.1,
+            # dummy_comp=True,
+            # dummy_prob=1 / (1 * np.sqrt(2 * np.pi)) * np.exp(-1 / 2),
+            # dummy_quantile=0.1,
         ).fit(data_)
     else:
         raise (f"Unknown method {method}; Should be 'BGMM' or 'GMM'")
@@ -386,7 +391,8 @@ def associate(
     events = []
     assignment = []
 
-    for i in range(len(centers_init)):
+    # for i in range(len(centers_init)):
+    for i in range(max_num_event):
         tmp_data = data_[pred == i]
         tmp_locs = locs_[pred == i]
         tmp_pick_station_id = pick_station_id_[pred == i]

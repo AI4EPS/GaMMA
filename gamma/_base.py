@@ -1,20 +1,22 @@
 """Base class for mixture models."""
 
-# Author: Wei Xue <xuewei4d@gmail.com>
-# Modified by Thierry Guillemot <thierry.guillemot.work@gmail.com>
-# License: BSD 3 clause
+# Authors: The scikit-learn developers
+# SPDX-License-Identifier: BSD-3-Clause
 
 import warnings
 from abc import ABCMeta, abstractmethod
+from numbers import Integral, Real
 from time import time
 
 import numpy as np
 from scipy.special import logsumexp
 from sklearn import cluster
-from sklearn.base import BaseEstimator, DensityMixin
+from sklearn.base import BaseEstimator, DensityMixin, _fit_context
+from sklearn.cluster import kmeans_plusplus
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.utils import check_array, check_random_state
-from sklearn.utils.validation import check_is_fitted
+from sklearn.utils import check_random_state
+from sklearn.utils._param_validation import Interval, StrOptions
+from sklearn.utils.validation import check_is_fitted, validate_data
 
 from .seismic_ops import initialize_centers
 
@@ -28,39 +30,13 @@ def _check_shape(param, param_shape, name):
 
     param_shape : tuple
 
-    name : string
+    name : str
     """
     param = np.array(param)
     if param.shape != param_shape:
         raise ValueError(
-            "The parameter '%s' should have the shape of %s, " "but got %s" % (name, param_shape, param.shape)
+            "The parameter '%s' should have the shape of %s, but got %s" % (name, param_shape, param.shape)
         )
-
-
-def _check_X(X, n_components=None, n_features=None, ensure_min_samples=1):
-    """Check the input data X.
-
-    Parameters
-    ----------
-    X : array-like of shape (n_samples, n_features)
-
-    n_components : int
-
-    Returns
-    -------
-    X : array, shape (n_samples, n_features)
-    """
-    X = check_array(X, dtype=[np.float64, np.float32], ensure_min_samples=ensure_min_samples)
-    if n_components is not None and X.shape[0] < n_components:
-        raise ValueError(
-            "Expected n_samples >= n_components "
-            "but got n_components = %d, n_samples = %d" % (n_components, X.shape[0])
-        )
-    if n_features is not None and X.shape[-1] != n_features:
-        raise ValueError(
-            "Expected the input data X have %d features, " "but got %d features" % (n_features, X.shape[-1])
-        )
-    return X
 
 
 class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
@@ -69,6 +45,19 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
     This abstract class specifies an interface for all mixture classes and
     provides basic common methods for mixture models.
     """
+
+    _parameter_constraints: dict = {
+        "n_components": [Interval(Integral, 1, None, closed="left")],
+        "tol": [Interval(Real, 0.0, None, closed="left")],
+        "reg_covar": [Interval(Real, 0.0, None, closed="left")],
+        "max_iter": [Interval(Integral, 0, None, closed="left")],
+        "n_init": [Interval(Integral, 1, None, closed="left")],
+        "init_params": [StrOptions({"kmeans", "random", "random_from_data", "k-means++", "centers"})],
+        "random_state": ["random_state"],
+        "warm_start": ["boolean"],
+        "verbose": ["verbose"],
+        "verbose_interval": [Interval(Integral, 1, None, closed="left")],
+    }
 
     def __init__(
         self,
@@ -82,9 +71,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         warm_start,
         verbose,
         verbose_interval,
-        dummy_comp=False,
-        dummy_prob=0.01,
-        dummy_quantile=0.1,
+        **kwargs,
     ):
         self.n_components = n_components
         self.tol = tol
@@ -96,44 +83,9 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         self.warm_start = warm_start
         self.verbose = verbose
         self.verbose_interval = verbose_interval
-        self.dummy_comp = dummy_comp
-        self.dummy_prob = dummy_prob
-        self.dummy_quantile = dummy_quantile
 
-    def _check_initial_parameters(self, X):
-        """Check values of the basic parameters.
-
-        Parameters
-        ----------
-        X : array-like of shape (n_samples, n_features)
-        """
-        if self.n_components < 1:
-            raise ValueError(
-                "Invalid value for 'n_components': %d " "Estimation requires at least one component" % self.n_components
-            )
-
-        if self.tol < 0.0:
-            raise ValueError(
-                "Invalid value for 'tol': %.5f " "Tolerance used by the EM must be non-negative" % self.tol
-            )
-
-        if self.n_init < 1:
-            raise ValueError("Invalid value for 'n_init': %d " "Estimation requires at least one run" % self.n_init)
-
-        if self.max_iter < 1:
-            raise ValueError(
-                "Invalid value for 'max_iter': %d " "Estimation requires at least one iteration" % self.max_iter
-            )
-
-        if self.reg_covar < 0.0:
-            raise ValueError(
-                "Invalid value for 'reg_covar': %.5f "
-                "regularization on covariance must be "
-                "non-negative" % self.reg_covar
-            )
-
-        # Check all the parameters values of the derived class
-        self._check_parameters(X)
+        # self.station_locs = kwargs.get("station_locs", None)
+        # self.vel = kwargs.get("vel", None)
 
     @abstractmethod
     def _check_parameters(self, X):
@@ -158,26 +110,33 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         """
         n_samples, _ = X.shape
 
+        X_ = np.hstack([X[:, 0:1], self.station_locs[:, 0:2] / self.vel["p"]])  # t, xy/vp
+
         if self.init_params == "kmeans":
-            resp = np.zeros((n_samples, self.n_components))
-            if self.dummy_comp:
-                label = (
-                    cluster.KMeans(n_clusters=self.n_components - 1, n_init=1, random_state=random_state).fit(X).labels_
-                )
-            else:
-                label = cluster.KMeans(n_clusters=self.n_components, n_init=1, random_state=random_state).fit(X).labels_
+            resp = np.zeros((n_samples, self.n_components), dtype=X.dtype)
+            label = cluster.KMeans(n_clusters=self.n_components, n_init=1, random_state=random_state).fit(X_).labels_
             resp[np.arange(n_samples), label] = 1
         elif self.init_params == "random":
-            resp = random_state.rand(n_samples, self.n_components)
+            resp = np.asarray(random_state.uniform(size=(n_samples, self.n_components)), dtype=X.dtype)
             resp /= resp.sum(axis=1)[:, np.newaxis]
+        elif self.init_params == "random_from_data":
+            resp = np.zeros((n_samples, self.n_components), dtype=X.dtype)
+            indices = random_state.choice(n_samples, size=self.n_components, replace=False)
+            resp[indices, np.arange(self.n_components)] = 1
+        elif self.init_params == "k-means++":
+            resp = np.zeros((n_samples, self.n_components), dtype=X.dtype)
+            _, indices = kmeans_plusplus(
+                X_,
+                self.n_components,
+                random_state=random_state,
+            )
+            resp[indices, np.arange(self.n_components)] = 1
         elif self.init_params == "centers":
             # resp = self._initialize_centers(X, random_state)
             resp, centers, means = initialize_centers(
                 X, self.phase_type, self.centers_init, self.station_locs, random_state
             )
             self.centers_init = centers
-        else:
-            raise ValueError("Unimplemented initialization method '%s'" % self.init_params)
 
         self._initialize(X, resp)
 
@@ -211,13 +170,19 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             List of n_features-dimensional data points. Each row
             corresponds to a single data point.
 
+        y : Ignored
+            Not used, present for API consistency by convention.
+
         Returns
         -------
-        self
+        self : object
+            The fitted mixture.
         """
+        # parameters are validated in fit_predict
         self.fit_predict(X, y)
         return self
 
+    @_fit_context(prefer_skip_nested_validation=True)
     def fit_predict(self, X, y=None):
         """Estimate model parameters using X and predict the labels for X.
 
@@ -237,20 +202,29 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             List of n_features-dimensional data points. Each row
             corresponds to a single data point.
 
+        y : Ignored
+            Not used, present for API consistency by convention.
+
         Returns
         -------
         labels : array, shape (n_samples,)
             Component labels.
         """
-        X = _check_X(X, self.n_components, ensure_min_samples=2)
-        self._check_n_features(X, reset=True)
-        self._check_initial_parameters(X)
+        X = validate_data(self, X, dtype=[np.float64, np.float32], ensure_min_samples=2)
+        if X.shape[0] < self.n_components:
+            raise ValueError(
+                "Expected n_samples >= n_components "
+                f"but got n_components = {self.n_components}, "
+                f"n_samples = {X.shape[0]}"
+            )
+        self._check_parameters(X)
 
         # if we enable warm_start, we will have a unique initialisation
         do_init = not (self.warm_start and hasattr(self, "converged_"))
         n_init = self.n_init if do_init else 1
 
         max_lower_bound = -np.inf
+        best_lower_bounds = []
         self.converged_ = False
 
         random_state = check_random_state(self.random_state)
@@ -263,40 +237,55 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                 self._initialize_parameters(X, random_state)
 
             lower_bound = -np.inf if do_init else self.lower_bound_
+            current_lower_bounds = []
 
-            for n_iter in range(1, self.max_iter + 1):
-                prev_lower_bound = lower_bound
-
-                log_prob_norm, log_resp = self._e_step(X)
-                self._m_step(X, log_resp)
-                lower_bound = self._compute_lower_bound(log_resp, log_prob_norm)
-
-                change = lower_bound - prev_lower_bound
-                self._print_verbose_msg_iter_end(n_iter, change)
-
-                if abs(change) < self.tol:
-                    self.converged_ = True
-                    break
-
-            self._print_verbose_msg_init_end(lower_bound)
-
-            if lower_bound > max_lower_bound:
-                max_lower_bound = lower_bound
+            if self.max_iter == 0:
                 best_params = self._get_parameters()
-                best_n_iter = n_iter
+                best_n_iter = 0
+            else:
+                converged = False
+                for n_iter in range(1, self.max_iter + 1):
+                    prev_lower_bound = lower_bound
 
-        # if not self.converged_:
-        #     warnings.warn('Initialization %d did not converge. '
-        #                   'Try different init parameters, '
-        #                   'or increase max_iter, tol '
-        #                   'or check for degenerate data.'
-        #                   % (init + 1), ConvergenceWarning)
-        if not self.converged_:
-            print(f"\nInitialization {init + 1} did not converge.")
+                    log_prob_norm, log_resp = self._e_step(X)
+                    self._m_step(X, log_resp)
+                    lower_bound = self._compute_lower_bound(log_resp, log_prob_norm)
+                    current_lower_bounds.append(lower_bound)
+
+                    change = lower_bound - prev_lower_bound
+                    self._print_verbose_msg_iter_end(n_iter, change)
+
+                    if abs(change) < self.tol:
+                        converged = True
+                        break
+
+                self._print_verbose_msg_init_end(lower_bound, converged)
+
+                if lower_bound > max_lower_bound or max_lower_bound == -np.inf:
+                    max_lower_bound = lower_bound
+                    best_params = self._get_parameters()
+                    best_n_iter = n_iter
+                    best_lower_bounds = current_lower_bounds
+                    self.converged_ = converged
+
+        # Should only warn about convergence if max_iter > 0, otherwise
+        # the user is assumed to have used 0-iters initialization
+        # to get the initial means.
+        if not self.converged_ and self.max_iter > 0:
+            warnings.warn(
+                (
+                    "Initialization did not converge."
+                    # "Best performing initialization did not converge. "
+                    # "Try different init parameters, or increase max_iter, "
+                    # "tol, or check for degenerate data."
+                ),
+                ConvergenceWarning,
+            )
 
         self._set_parameters(best_params)
         self.n_iter_ = best_n_iter
         self.lower_bound_ = max_lower_bound
+        self.lower_bounds_ = best_lower_bounds
 
         # Always do a final e-step to guarantee that the labels returned by
         # fit_predict(X) are always consistent with fit(X).predict(X)
@@ -347,7 +336,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         pass
 
     def score_samples(self, X):
-        """Compute the weighted log probabilities for each sample.
+        """Compute the log-likelihood of each sample.
 
         Parameters
         ----------
@@ -358,10 +347,10 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         Returns
         -------
         log_prob : array, shape (n_samples,)
-            Log probabilities of each data point in X.
+            Log-likelihood of each sample in `X` under the current model.
         """
         check_is_fitted(self)
-        X = _check_X(X, None, self.means_.shape[-1])
+        X = validate_data(self, X, reset=False)
 
         return logsumexp(self._estimate_weighted_log_prob(X), axis=1)
 
@@ -374,10 +363,13 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             List of n_features-dimensional data points. Each row
             corresponds to a single data point.
 
+        y : Ignored
+            Not used, present for API consistency by convention.
+
         Returns
         -------
         log_likelihood : float
-            Log likelihood of the Gaussian mixture given X.
+            Log-likelihood of `X` under the Gaussian mixture model.
         """
         return self.score_samples(X).mean()
 
@@ -396,11 +388,11 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             Component labels.
         """
         check_is_fitted(self)
-        X = _check_X(X, None, self.means_.shape[-1])
+        X = validate_data(self, X, reset=False)
         return self._estimate_weighted_log_prob(X).argmax(axis=1)
 
     def predict_proba(self, X):
-        """Predict posterior probability of each component given the data.
+        """Evaluate the components' density for each sample.
 
         Parameters
         ----------
@@ -411,11 +403,10 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         Returns
         -------
         resp : array, shape (n_samples, n_components)
-            Returns the probability each Gaussian (state) in
-            the model given each sample.
+            Density of each Gaussian component for each sample in X.
         """
         check_is_fitted(self)
-        X = _check_X(X, None, self.means_.shape[-1])
+        X = validate_data(self, X, reset=False)
         _, log_resp = self._estimate_log_prob_resp(X)
         return np.exp(log_resp)
 
@@ -430,11 +421,10 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         Returns
         -------
         X : array, shape (n_samples, n_features)
-            Randomly generated sample
+            Randomly generated sample.
 
         y : array, shape (nsamples,)
-            Component labels
-
+            Component labels.
         """
         check_is_fitted(self)
 
@@ -444,7 +434,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                 "least one sample." % (self.n_components)
             )
 
-        _, _, n_features = self.means_.shape
+        _, n_features = self.means_.shape
         rng = check_random_state(self.random_state)
         n_samples_comp = rng.multinomial(n_samples, self.weights_)
 
@@ -465,7 +455,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         else:
             X = np.vstack(
                 [
-                    mean + rng.randn(sample, n_features) * np.sqrt(covariance)
+                    mean + rng.standard_normal(size=(sample, n_features)) * np.sqrt(covariance)
                     for (mean, covariance, sample) in zip(self.means_, self.covariances_, n_samples_comp)
                 ]
             )
@@ -561,12 +551,11 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                 )
                 self._iter_prev_time = cur_time
 
-    def _print_verbose_msg_init_end(self, ll):
+    def _print_verbose_msg_init_end(self, lb, init_has_converged):
         """Print verbose message on the end of iteration."""
+        converged_msg = "converged" if init_has_converged else "did not converge"
         if self.verbose == 1:
-            print("Initialization converged: %s" % self.converged_)
+            print(f"Initialization {converged_msg}.")
         elif self.verbose >= 2:
-            print(
-                "Initialization converged: %s\t time lapse %.5fs\t ll %.5f"
-                % (self.converged_, time() - self._init_prev_time, ll)
-            )
+            t = time() - self._init_prev_time
+            print(f"Initialization {converged_msg}. time lapse {t:.5f}s\t lower bound" f" {lb:.5f}.")
