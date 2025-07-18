@@ -12,6 +12,7 @@ from tqdm import tqdm
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
 from .seismic_ops import calc_amp, calc_time, initialize_eikonal
+from pyproj import Proj
 
 to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
@@ -64,14 +65,16 @@ def convert_picks_csv(picks, stations, config):
     else:
         data = t[:, np.newaxis]
     meta = stations.merge(picks["id"], how="right", on="id", validate="one_to_many")
-    locs = meta[config["dims"]].to_numpy()
+    locs_xyz = meta[config["dims"]].to_numpy()
+    locs_geo = meta[["longitude", "latitude", "elevation_m"]].to_numpy() / np.array([1, 1, 1000]) # km
     phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
     pick_station_id = picks.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
     nan_idx = meta.isnull().any(axis=1)
     return (
         data[~nan_idx],
-        locs[~nan_idx],
+        locs_xyz[~nan_idx],
+        locs_geo[~nan_idx],
         phase_type[~nan_idx],
         phase_weight[~nan_idx],
         picks.index.to_numpy()[~nan_idx],
@@ -84,8 +87,8 @@ def hierarchical_dbscan_clustering(
     data, phase_loc, phase_type, phase_weight, vel, eps=15, min_samples=3, min_cluster_size=500, max_time_space_ratio=10
 ):
 
-    def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
-        data = np.hstack([t, xy / vel["p"]])  # time, x, y
+    def dbscan2(t, xyz, w, ph, vel, eps, min_samples, ratio=1.1):
+        data = np.hstack([t, xyz / vel["p"]])  # time, x, y
         db_ = DBSCAN(eps=eps * ratio, min_samples=min_samples, n_jobs=-1).fit(data, sample_weight=np.squeeze(w, axis=-1))
         return db_.labels_
 
@@ -116,18 +119,18 @@ def hierarchical_dbscan_clustering(
                 continue
 
             t = data[idx, 0:1]
-            xy = phase_loc[idx, :2]
+            xyz = phase_loc[idx, :3]
             w = phase_weight[idx]
             ph = phase_type[idx]
 
-            dxy = np.linalg.norm(xy.max(axis=0) - xy.min(axis=0))
+            dxyz = np.linalg.norm(xyz.max(axis=0) - xyz.min(axis=0))
             dt = t.max() - t.min()
-            if dt < dxy / vel["p"] * max_time_space_ratio:  # s
+            if dt < dxyz / vel["p"] * max_time_space_ratio:  # s
                 continue
             # else:
             #     print(f"Splitting {len(t)} picks using eps={eps * ratio:.2f}")
 
-            labels_ = dbscan2(t, xy, w, ph, vel, eps=eps, min_samples=min_samples, ratio=ratio)
+            labels_ = dbscan2(t, xyz, w, ph, vel, eps=eps, min_samples=min_samples, ratio=ratio)
             labels_ = np.where(labels_ == -1, -1, labels_ + current_label)
             labels[idx] = labels_
 
@@ -141,7 +144,7 @@ def hierarchical_dbscan_clustering(
 
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
-    data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
+    data, locs_xyz, locs_geo, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
         picks, stations, config
     )
 
@@ -162,7 +165,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         # labels = db.labels_
         labels = hierarchical_dbscan_clustering(
             data,
-            locs,
+            locs_xyz,
             phase_type,
             phase_weight,
             vel,
@@ -193,7 +196,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 unique_label,
                 labels,
                 data,
-                locs,
+                locs_geo,
                 phase_type,
                 phase_weight,
                 pick_idx,
@@ -238,7 +241,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                         k,
                         labels,
                         data,
-                        locs,
+                        locs_geo,
                         phase_type,
                         phase_weight,
                         pick_idx,
@@ -268,7 +271,7 @@ def associate(
     k,
     labels,
     data,
-    locs,
+    locs_,
     phase_type,
     phase_weight,
     pick_idx,
@@ -283,11 +286,30 @@ def associate(
     print(".", end="")
 
     data_ = data[labels == k]
-    locs_ = locs[labels == k]
+    locs_ = locs_[labels == k]
     phase_type_ = phase_type[labels == k]
     phase_weight_ = phase_weight[labels == k]
     pick_idx_ = pick_idx[labels == k]
     pick_station_id_ = pick_station_id[labels == k]
+
+    ## proj
+    locs0 = np.mean(locs_, axis=0)
+    proj = Proj(f"+proj=aeqd +lon_0={locs0[0]} +lat_0={locs0[1]} +units=km")
+    tmp = proj(locs_[:, 0], locs_[:, 1])
+    locs_[:,0] = tmp[0]
+    locs_[:,1] = tmp[1]
+
+    config["x(km)"] = [tmp[0].min() - 100, tmp[0].max() + 100]
+    config["y(km)"] = [tmp[1].min() - 100, tmp[1].max() + 100]
+    config["z(km)"] = [0, 100]
+
+    config["bfgs_bounds"] = (
+        (config["x(km)"][0] - 1, config["x(km)"][1] + 1),  # x
+        (config["y(km)"][0] - 1, config["y(km)"][1] + 1),  # y
+        (0, config["z(km)"][1] + 1),  # z
+        (None, None),  # t
+    )
+
 
     max_num_event = max(Counter(pick_station_id_).values()) * config["oversample_factor"]
     max_num_event = min(max_num_event, len(data_)//3)
@@ -340,6 +362,7 @@ def associate(
     else:
         covariance_prior = np.array([[covariance_prior_pre[0]]])
         data_ = data_[:, 0:1]
+
 
     if method == "BGMM":
         gmm = BayesianGaussianMixture(
@@ -501,6 +524,10 @@ def associate(
         }
         for j, k in enumerate(config["dims"]):  ## add location
             event[k] = gmm.centers_[i, j]
+        tmp = proj(event["x(km)"], event["y(km)"], inverse=True)
+        event["longitude"] = tmp[0]
+        event["latitude"] = tmp[1]
+        event["depth_km"] = event["z(km)"]
         events.append(event)
 
         for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
