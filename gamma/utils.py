@@ -1,5 +1,6 @@
 import multiprocessing as mp
 import platform
+import random
 from collections import Counter
 from datetime import datetime
 
@@ -16,6 +17,11 @@ to_seconds = lambda t: t.timestamp(tz="UTC")
 from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
 # to_seconds = lambda t: datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f").timestamp()
 # from_seconds = lambda t: [datetime.utcfromtimestamp(x).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] for x in t]
+
+
+def random_seed():
+    np.random.seed(42)
+    random.seed(42)
 
 
 # def estimate_station_spacing(stations):
@@ -236,7 +242,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         else:
             context = "fork"
 
-        with mp.get_context(context).Pool(config["ncpu"]) as p:
+        with mp.get_context(context).Pool(config["ncpu"], initializer=random_seed) as p:
             results = p.starmap(
                 associate,
                 [

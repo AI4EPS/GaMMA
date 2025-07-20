@@ -374,7 +374,7 @@ def _compute_precision_cholesky(covariances, covariance_type):
     dtype = covariances.dtype
     if dtype == np.float32:
         estimate_precision_error_message += (
-            " The numerical accuracy can also be improved by passing float64" " data instead of float32."
+            " The numerical accuracy can also be improved by passing float64 data instead of float32."
         )
 
     if covariance_type == "full":

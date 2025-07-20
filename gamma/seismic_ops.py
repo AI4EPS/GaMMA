@@ -1,11 +1,9 @@
-import itertools
 import time
 from pathlib import Path
 
 import numpy as np
 import scipy.optimize
 from numba import njit
-from numba.typed import List
 
 # import shelve
 
@@ -301,7 +299,6 @@ def calc_loc(
     max_iter=100,
     convergence=1e-6,
 ):
-
     opt = scipy.optimize.minimize(
         huber_loss_grad,
         np.squeeze(event_loc0),
@@ -394,7 +391,7 @@ def initialize_eikonal(config):
     return config
 
 
-def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
+def initialize_centers(X, phase_type, phase_weight, centers_init, station_locs, sigma=1.0, random_state=None):
     n_samples, n_features = X.shape
     n_components, _ = centers_init.shape
     centers = centers_init.copy()
@@ -423,7 +420,7 @@ def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
     # resp = prob / prob_sum
 
     dist = np.linalg.norm(means - X, axis=-1).T  # (n_components, n_samples, n_features) -> (n_samples, n_components)
-    resp = np.exp(-dist)
+    resp = 1 / sigma * np.exp(-(dist**2) / (2 * sigma**2)) * phase_weight[:, np.newaxis]
     resp_sum = resp.sum(axis=1, keepdims=True)
     resp_sum[resp_sum == 0] = 1.0
     resp = resp / resp_sum
@@ -434,7 +431,9 @@ def initialize_centers(X, phase_type, centers_init, station_locs, random_state):
 
     if n_features == 2:
         for i in range(n_components):
-            centers[i, -1:] = calc_mag(X[:, 1:2], centers_init[i : i + 1, :-1], station_locs, resp[:, i : i + 1])
+            centers[i, -1:] = calc_mag(
+                X[:, 1:2], centers_init[i : i + 1, :-1], station_locs, resp[:, i : i + 1] * phase_weight[:, np.newaxis]
+            )
 
     return resp, centers, means
 

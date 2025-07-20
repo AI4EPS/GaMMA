@@ -405,8 +405,6 @@ class BayesianGaussianMixture(BaseMixture):
             warm_start=warm_start,
             verbose=verbose,
             verbose_interval=verbose_interval,
-            station_locs=station_locs,
-            vel=vel,
         )
 
         self.covariance_type = covariance_type
@@ -507,7 +505,9 @@ class BayesianGaussianMixture(BaseMixture):
             }[self.covariance_type]
 
         elif self.covariance_type in ["full", "tied"]:
-            self.covariance_prior_ = check_array(self.covariance_prior, dtype=[np.float64, np.float32], ensure_2d=False)
+            self.covariance_prior_ = check_array(
+                self.covariance_prior, dtype=[np.float64, np.float32], ensure_2d=False
+            )
             _check_shape(
                 self.covariance_prior_,
                 (n_features, n_features),
@@ -515,7 +515,9 @@ class BayesianGaussianMixture(BaseMixture):
             )
             _check_precision_matrix(self.covariance_prior_, self.covariance_type)
         elif self.covariance_type == "diag":
-            self.covariance_prior_ = check_array(self.covariance_prior, dtype=[np.float64, np.float32], ensure_2d=False)
+            self.covariance_prior_ = check_array(
+                self.covariance_prior, dtype=[np.float64, np.float32], ensure_2d=False
+            )
             _check_shape(
                 self.covariance_prior_,
                 (n_features,),

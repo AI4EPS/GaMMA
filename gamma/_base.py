@@ -132,7 +132,13 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         elif self.init_params == "centers":
             # resp = self._initialize_centers(X, random_state)
             resp, centers, means = initialize_centers(
-                X, self.phase_type, self.centers_init, self.station_locs, random_state
+                X,
+                self.phase_type,
+                self.phase_weight,
+                self.centers_init,
+                self.station_locs,
+                np.sqrt(self.covariance_prior[0][0]),
+                random_state,
             )
             self.centers_init = centers
 
