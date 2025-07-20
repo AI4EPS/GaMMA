@@ -5,7 +5,6 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from scipy.sparse.csgraph import minimum_spanning_tree
 from sklearn.cluster import DBSCAN
 from tqdm import tqdm
 
@@ -81,12 +80,21 @@ def convert_picks_csv(picks, stations, config):
 
 
 def hierarchical_dbscan_clustering(
-    data, phase_loc, phase_type, phase_weight, vel, eps=15, min_samples=3, min_cluster_size=500, max_time_space_ratio=10
+    data,
+    phase_loc,
+    phase_type,
+    phase_weight,
+    vel,
+    eps=15,
+    min_samples=3,
+    min_cluster_size=500,
+    max_time_space_ratio=10,
 ):
-
     def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
         data = np.hstack([t, xy / vel["p"]])  # time, x, y
-        db_ = DBSCAN(eps=eps * ratio, min_samples=min_samples, n_jobs=-1).fit(data, sample_weight=np.squeeze(w, axis=-1))
+        db_ = DBSCAN(eps=eps * ratio, min_samples=min_samples, n_jobs=-1).fit(
+            data, sample_weight=np.squeeze(w, axis=-1)
+        )
         return db_.labels_
 
     db = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(
@@ -100,14 +108,12 @@ def hierarchical_dbscan_clustering(
     ratio = 1
 
     for _ in range(50):
-
         ratio /= 1.2
         unique_labels = np.unique(labels)
         current_label = unique_labels.max() + 1
         keep_split = False
 
         for label in tqdm(unique_labels, desc=f"Clustering (eps={eps * ratio:.2f})"):
-
             if label == -1:
                 continue
 
@@ -290,7 +296,7 @@ def associate(
     pick_station_id_ = pick_station_id[labels == k]
 
     max_num_event = max(Counter(pick_station_id_).values()) * config["oversample_factor"]
-    max_num_event = min(max_num_event, len(data_)//3)
+    max_num_event = min(max_num_event, len(data_) // 3)
 
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
         return [], []
@@ -300,7 +306,7 @@ def associate(
     #     amp_range = max(data_[:, 1].max() - data_[:, 1].min(), 1)
 
     # ## initialization with [1,1,1] horizontal points and N time points
-    # centers_init = init_centers(config, data_, locs_, time_range, max_num_event)
+    centers_init = init_centers(config, data_, locs_, phase_type_, phase_weight_, max_num_event)
 
     ## run clustering
     # mean_precision_prior = 0.01 / time_range
@@ -327,7 +333,10 @@ def associate(
         ## option 4
         rstd = np.sqrt(x_std**2 + y_std**2)
         # scaler = max(10.0, (rstd / 6.0) * (rstd / 60.0))  # 6.0 km/s, 60 km
-        scaler = max(1.0, (rstd / 6.0) * (rstd / 30.0))  # 6.0 km/s, 30 km
+        # scaler = max(1.0, (rstd / 6.0) * (rstd / 30.0))  # 6.0 km/s, 30 km
+        a, b = 0.5, 15
+        scaler = a + (b ** (rstd / 30) - 1) / (b - 1) * 4.0  # (0, a), (30, 4 + a)
+        # print(f"rstd: {rstd}, scaler: {scaler}, max_num_event: {max_num_event}")
         if config["use_amplitude"]:
             # covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
             covariance_prior_pre = [scaler, scaler]
@@ -341,30 +350,35 @@ def associate(
         covariance_prior = np.array([[covariance_prior_pre[0]]])
         data_ = data_[:, 0:1]
 
+    random_state = 42
     if method == "BGMM":
         gmm = BayesianGaussianMixture(
             n_components=max_num_event,
+            # weight_concentration_prior_type="dirichlet_process",
             weight_concentration_prior=1.0 / max_num_event,
             # mean_precision_prior=mean_precision_prior,
             covariance_prior=covariance_prior,
+            # init_params="random",
             # init_params="k-means++",
-            init_params="kmeans",
-            # init_params="centers",
-            # centers_init=centers_init.copy(),
+            # init_params="kmeans",
+            init_params="centers",
+            centers_init=centers_init.copy(),
             station_locs=locs_,
             phase_type=phase_type_,
             phase_weight=phase_weight_,
             vel=vel,
             eikonal=config["eikonal"],
             bounds=config["bfgs_bounds"],
+            random_state=random_state,
         ).fit(data_)
     elif method == "GMM":
         gmm = GaussianMixture(
             n_components=max_num_event,
+            # init_params="random",
             # init_params="k-means++",
-            init_params="kmeans",
-            # init_params="centers",
-            # centers_init=centers_init.copy(),
+            # init_params="kmeans",
+            init_params="centers",
+            centers_init=centers_init.copy(),
             station_locs=locs_,
             phase_type=phase_type_,
             phase_weight=phase_weight_,
@@ -374,6 +388,7 @@ def associate(
             # dummy_comp=True,
             # dummy_prob=1 / (1 * np.sqrt(2 * np.pi)) * np.exp(-1 / 2),
             # dummy_quantile=0.1,
+            random_state=random_state,
         ).fit(data_)
     else:
         raise (f"Unknown method {method}; Should be 'BGMM' or 'GMM'")
@@ -581,29 +596,45 @@ def associate(
 #     return centers_init
 
 
-def init_centers(config, data_, locs_, time_range, max_num_event=1):
+def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
     """
     max_num_event: maximum number of events at one station
     """
 
-    if "initial_points" in config:
-        initial_points = config["initial_points"]
-        if not isinstance(initial_points, list):
-            initial_points = [initial_points, initial_points, initial_points]
+    # t_init = np.random.choice(data_[:, 0], max_num_event, replace=False)
+    # x_init = np.random.uniform(config["x(km)"][0], config["x(km)"][1], max_num_event)
+    # y_init = np.random.uniform(config["y(km)"][0], config["y(km)"][1], max_num_event)
+    # z_init = np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
+
+    # index = np.argsort(data_[:, 0])[:: max(len(data_) // max_num_event, 1)][:max_num_event]
+    # use p first, then s
+    index = np.argsort(data_[:, 0])
+    p_index = index[type_ == "p"]
+    s_index = index[type_ == "s"]
+    if len(p_index) >= max_num_event:
+        index = p_index[:: max(len(p_index) // max_num_event, 1)][:max_num_event]
     else:
-        initial_points = [1, 1, 1]
+        num = max_num_event - len(p_index)
+        index = np.concatenate([p_index, s_index[:: max(len(s_index) // num, 1)][:num]])
 
-    num_t_init = min(max(int(max_num_event * config["oversample_factor"]), 1), len(data_))
-
-    index = np.argsort(data_[:, 0])[:: max(len(data_) // num_t_init, 1)][:num_t_init]
-    t_init = data_[index, 0]
-    x_init = locs_[:, 0][index]  # + np.random.uniform(low=-1, high=1, size=num_t_init) * np.std(locs_[:, 0])
-    y_init = locs_[:, 1][index]  # + np.random.uniform(low=-1, high=1, size=num_t_init) * np.std(locs_[:, 1])
-    # x_init, y_init = np.mean(locs_[:, 0]), np.mean(locs_[:, 1])
-    # x_init = np.broadcast_to(x_init, (num_t_init)).reshape(-1)
-    # y_init = np.broadcast_to(y_init, (num_t_init)).reshape(-1)
-    z_init = np.linspace(config["z(km)"][0], config["z(km)"][1], initial_points[2] + 2)[1:-1]
-    z_init = np.broadcast_to(z_init, (num_t_init)).reshape(-1)
+    weight_ = weight_.squeeze()
+    mu_x = np.average(locs_[:, 0], weights=weight_)
+    sigma_x = np.sqrt(np.average((locs_[:, 0] - mu_x) ** 2, weights=weight_))
+    mu_y = np.average(locs_[:, 1], weights=weight_)
+    sigma_y = np.sqrt(np.average((locs_[:, 1] - mu_y) ** 2, weights=weight_))
+    t_init = (
+        data_[index, 0]
+        # + np.random.uniform(low=-1, high=0, size=max_num_event)
+        # * (np.std(locs_[:, 0]) + np.std(locs_[:, 1]))
+        # / 2.0
+        # / 6.0
+    )
+    x_init = locs_[index, 0] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_x
+    y_init = locs_[index, 1] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_y
+    z_init = (
+        np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
+        # + np.random.uniform(low=-1, high=1, size=max_num_event) * (config["z(km)"][1] - config["z(km)"][0]) / 6.0
+    )
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
         centers_init = np.vstack([x_init, y_init, z_init, t_init]).T

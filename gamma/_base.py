@@ -3,7 +3,6 @@
 # Authors: The scikit-learn developers
 # SPDX-License-Identifier: BSD-3-Clause
 
-import warnings
 from abc import ABCMeta, abstractmethod
 from numbers import Integral, Real
 from time import time
@@ -13,7 +12,6 @@ from scipy.special import logsumexp
 from sklearn import cluster
 from sklearn.base import BaseEstimator, DensityMixin, _fit_context
 from sklearn.cluster import kmeans_plusplus
-from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils import check_random_state
 from sklearn.utils._param_validation import Interval, StrOptions
 from sklearn.utils.validation import check_is_fitted, validate_data
@@ -272,15 +270,16 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
         # the user is assumed to have used 0-iters initialization
         # to get the initial means.
         if not self.converged_ and self.max_iter > 0:
-            warnings.warn(
-                (
-                    "Initialization did not converge."
-                    # "Best performing initialization did not converge. "
-                    # "Try different init parameters, or increase max_iter, "
-                    # "tol, or check for degenerate data."
-                ),
-                ConvergenceWarning,
-            )
+            # warnings.warn(
+            #     (
+            #         "Initialization did not converge."
+            #         # "Best performing initialization did not converge. "
+            #         # "Try different init parameters, or increase max_iter, "
+            #         # "tol, or check for degenerate data."
+            #     ),
+            #     ConvergenceWarning,
+            # )
+            print("x")
 
         self._set_parameters(best_params)
         self.n_iter_ = best_n_iter
@@ -430,8 +429,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
 
         if n_samples < 1:
             raise ValueError(
-                "Invalid value for 'n_samples': %d . The sampling requires at "
-                "least one sample." % (self.n_components)
+                "Invalid value for 'n_samples': %d . The sampling requires at least one sample." % (self.n_components)
             )
 
         _, n_features = self.means_.shape
@@ -558,4 +556,4 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
             print(f"Initialization {converged_msg}.")
         elif self.verbose >= 2:
             t = time() - self._init_prev_time
-            print(f"Initialization {converged_msg}. time lapse {t:.5f}s\t lower bound" f" {lb:.5f}.")
+            print(f"Initialization {converged_msg}. time lapse {t:.5f}s\t lower bound {lb:.5f}.")
