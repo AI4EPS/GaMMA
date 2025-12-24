@@ -301,7 +301,7 @@ def associate(
     pick_idx_ = pick_idx[labels == k]
     pick_station_id_ = pick_station_id[labels == k]
 
-    max_num_event = max(Counter(pick_station_id_).values()) * config["oversample_factor"]
+    max_num_event = int(max(Counter(pick_station_id_).values()) * config["oversample_factor"])
     max_num_event = min(max_num_event, len(data_) // 3)
 
     if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
