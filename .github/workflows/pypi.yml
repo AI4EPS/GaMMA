@@ -1,8 +1,7 @@
 name: pypi
 on:
-  push:
-    branches:
-      - master
+  release:
+    types: [published]
   # workflow_dispatch:
   #   inputs:
   #     version:
@@ -17,9 +16,9 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Install dependencies
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v5
       with:
         python-version: '3.8'
     - name: Install pypa/build
@@ -42,4 +41,5 @@ jobs:
 #         repository-url: https://upload.pypi.org/legacy/
         user: __token__
         password: ${{ secrets.PYPI_TOKEN }}
+        skip-existing: true
       # if: ${{ github.event.inputs.pypi_repo == 'pypi' }}
