@@ -637,10 +637,8 @@ def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
     )
     x_init = locs_[index, 0] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_x
     y_init = locs_[index, 1] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_y
-    z_init = (
-        np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
-        # + np.random.uniform(low=-1, high=1, size=max_num_event) * (config["z(km)"][1] - config["z(km)"][0]) / 6.0
-    )
+    z_low = max(config["z(km)"][0], min(10.0, config["z(km)"][1]))
+    z_init = np.random.uniform(low=z_low, high=config["z(km)"][1], size=max_num_event)
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
         centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
