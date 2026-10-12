@@ -160,7 +160,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     if len(data) < config["min_picks_per_eq"]:
         return [], []
 
-    vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
+    vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.75}
     if ("eikonal" not in config) or (config["eikonal"] is None):
         config["eikonal"] = None
     else:
@@ -198,7 +198,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     if config["ncpu"] == 1:
         print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
-        event_idx = 0
+        random_seed()
+        event_idx = event_idx0 - 1
         events, assignment = [], []
         for unique_label in list(unique_labels):
             events_, assignment_ = associate(
@@ -524,7 +525,7 @@ def associate(
             event[k] = gmm.centers_[i, j]
         events.append(event)
 
-        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
+        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob[pred == i][idx_filter]):
             assignment.append((pi, event_idx_value, pr))
 
         if (event_idx_value + 1) % 100 == 0:
@@ -615,8 +616,8 @@ def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
     # index = np.argsort(data_[:, 0])[:: max(len(data_) // max_num_event, 1)][:max_num_event]
     # use p first, then s
     index = np.argsort(data_[:, 0])
-    p_index = index[type_ == "p"]
-    s_index = index[type_ == "s"]
+    p_index = index[type_[index] == "p"]
+    s_index = index[type_[index] == "s"]
     if len(p_index) >= max_num_event:
         index = p_index[:: max(len(p_index) // max_num_event, 1)][:max_num_event]
     else:
