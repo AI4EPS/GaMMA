@@ -313,6 +313,7 @@ def associate(
 
     # ## initialization with [1,1,1] horizontal points and N time points
     centers_init = init_centers(config, data_, locs_, phase_type_, phase_weight_, max_num_event)
+    max_num_event = len(centers_init)  # init_centers may start each seed point at several depths
 
     ## run clustering
     # mean_precision_prior = 0.01 / time_range
@@ -637,8 +638,18 @@ def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
     )
     x_init = locs_[index, 0] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_x
     y_init = locs_[index, 1] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_y
-    z_low = max(config["z(km)"][0], min(10.0, config["z(km)"][1]))
-    z_init = np.random.uniform(low=z_low, high=config["z(km)"][1], size=max_num_event)
+    z_init = (
+        np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
+        # + np.random.uniform(low=-1, high=1, size=max_num_event) * (config["z(km)"][1] - config["z(km)"][0]) / 6.0
+    )
+
+    ## start each seed point at several depths, one per ~200 km of the z range
+    n_depth = (int(config["z(km)"][1]) + 200) // 200
+    if config["dims"] == ["x(km)", "y(km)", "z(km)"] and 1 < n_depth <= len(data_):
+        n_seed = max(min(max_num_event, len(data_) // n_depth), 1)
+        depths = config["z(km)"][0] + (np.arange(n_depth) + 0.5) * (config["z(km)"][1] - config["z(km)"][0]) / n_depth
+        x_init, y_init, t_init = (np.tile(a[:n_seed], n_depth) for a in (x_init, y_init, t_init))
+        z_init = np.repeat(depths, n_seed)
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
         centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
