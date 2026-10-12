@@ -139,6 +139,8 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                 self.station_locs,
                 np.sqrt(self.covariance_prior[0][0]),
                 random_state,
+                vel=self.vel,
+                eikonal=self.eikonal,
             )
             self.centers_init = centers
 
