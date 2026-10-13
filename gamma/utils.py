@@ -644,7 +644,7 @@ def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
     )
 
     ## start each seed point at several depths, one per ~200 km of the z range
-    n_depth = (int(config["z(km)"][1]) + 200) // 200
+    n_depth = (config["z(km)"][1] - config["z(km)"][0] + 199) // 200
     if config["dims"] == ["x(km)", "y(km)", "z(km)"] and 1 < n_depth <= len(data_):
         n_seed = max(min(max_num_event, len(data_) // n_depth), 1)
         depths = config["z(km)"][0] + (np.arange(n_depth) + 0.5) * (config["z(km)"][1] - config["z(km)"][0]) / n_depth
