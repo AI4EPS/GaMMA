@@ -416,9 +416,9 @@ class BayesianGaussianMixture(BaseMixture):
         self.covariance_prior = covariance_prior
         self.centers_init = centers_init
         if station_locs is None:
-            raise ("Missing: station_locs")
+            raise ValueError("Missing: station_locs")
         if phase_type is None:
-            raise ("Missing: phase_type")
+            raise ValueError("Missing: phase_type")
         if phase_weight is None:
             phase_weight = np.ones([len(phase_type), 1])
         self.vel = vel

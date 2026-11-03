@@ -75,17 +75,13 @@ def sweeping(u, v, h):
 
 
 def eikonal_solve(u, f, h):
-    print("Eikonal Solver: ")
-    t0 = time.time()
     for i in range(50):
         u_old = np.copy(u)
         u = sweeping(u, f, h)
 
         err = np.max(np.abs(u - u_old))
-        print(f"Iter {i}, error = {err:.3f}")
         if err < 1e-6:
             break
-    print(f"Time: {time.time() - t0:.3f}")
     return u
 
 
@@ -306,7 +302,7 @@ def calc_loc(
         jac=True,
         args=(phase_time, phase_type, station_loc, weight, vel, 1, eikonal),
         bounds=bounds,
-        options={"maxiter": max_iter, "gtol": convergence, "iprint": -1},
+        options={"maxiter": max_iter, "gtol": convergence},
     )
 
     return opt.x[np.newaxis, :], opt.fun
@@ -345,6 +341,7 @@ def initialize_eikonal(config):
     vp = np.ones((nr, nz)) * vp1d
     vs = np.ones((nr, nz)) * vs1d
 
+    t0 = time.time()
     ir0 = np.around((0 - rlim[0]) / h).astype(np.int64)
     iz0 = np.around((0 - zlim[0]) / h).astype(np.int64)
     up = 1000.0 * np.ones((nr, nz))
@@ -387,6 +384,7 @@ def initialize_eikonal(config):
             "h": h,
         }
     )
+    print(f"Eikonal: P and S tables of {nr} x {nz} nodes in {time.time() - t0:.1f} s")
 
     return config
 
