@@ -196,7 +196,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         # event_idx0 - 1 as event_idx is increased before use, as in the parallel path
         event_idx = event_idx0 - 1
         events, assignment = [], []
-        for unique_label in tqdm(list(unique_labels), desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster"):
+        for unique_label in tqdm(sorted(unique_labels), desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster"):
             events_, assignment_ = associate(
                 unique_label,
                 labels,
@@ -216,15 +216,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             events.extend(events_)
             assignment.extend(assignment_)
     else:
-        manager = mp.Manager()
-        lock = manager.Lock()
-        # event_idx0 - 1 as event_idx is increased before use
-        event_idx = manager.Value("i", event_idx0 - 1)
-
         # the following sort and shuffle is to make sure jobs are distributed evenly
         counter = Counter(labels)
         unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
-        np.random.shuffle(unique_labels)
+        np.random.RandomState(42).shuffle(unique_labels)  # its own generator: the same order every run
 
         # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
         chunk_size = max(len(unique_labels) // (config["ncpu"] * 20), 1)
@@ -236,7 +231,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         else:
             context = "fork"
 
-        with mp.get_context(context).Pool(config["ncpu"], initializer=random_seed) as p:
+        with mp.get_context(context).Pool(config["ncpu"]) as p:
             args = [
                 [
                     k,
@@ -251,8 +246,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                     timestamp0,
                     vel,
                     method,
-                    event_idx,
-                    lock,
+                    -1,  # each cluster numbers its events from 0; renumbered below
                 ]
                 for k in unique_labels
             ]
@@ -263,12 +257,17 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 desc=f"Associating {len(data)} picks ({config['ncpu']} CPUs)",
                 unit="cluster",
             )
-            # resuts is a list of tuples, each tuple contains two lists events and assignment
-            # here we flatten the list of tuples into two lists
-            events, assignment = [], []
-            for each_events, each_assignment in progress:
-                events.extend(each_events)
-                assignment.extend(each_assignment)
+            results = dict(zip(unique_labels, progress))
+
+        # number events in cluster order from event_idx0, as the serial path does, not in the order clusters finish
+        events, assignment, event_idx = [], [], event_idx0
+        for k in sorted(results):
+            each_events, each_assignment = results[k]
+            for event in each_events:
+                event["event_index"] += event_idx
+            events.extend(each_events)
+            assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
+            event_idx += len(each_events)
 
     print(f"Associated {len(events)} events with {len(assignment)} picks")
     return events, assignment  # , event_idx.value
@@ -312,7 +311,7 @@ def associate(
     #     amp_range = max(data_[:, 1].max() - data_[:, 1].min(), 1)
 
     # ## initialization with [1,1,1] horizontal points and N time points
-    centers_init = init_centers(config, data_, locs_, phase_type_, phase_weight_, max_num_event)
+    centers_init = init_centers(config, data_, locs_, phase_type_, phase_weight_, max_num_event, seed=42 + int(k))
 
     ## run clustering
     # mean_precision_prior = 0.01 / time_range
@@ -599,9 +598,10 @@ def associate(
 #     return centers_init
 
 
-def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
+def init_centers(config, data_, locs_, type_, weight_, max_num_event=1, seed=42):
     """
     max_num_event: maximum number of events at one station
+    seed: of this cluster's random start; differs between clusters so their starts are not offset alike
     """
 
     # t_init = np.random.choice(data_[:, 0], max_num_event, replace=False)
@@ -632,8 +632,10 @@ def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
         # / 2.0
         # / 6.0
     )
-    x_init = locs_[index, 0] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_x
-    y_init = locs_[index, 1] + np.random.uniform(low=-1, high=1, size=max_num_event) * sigma_y
+    # a generator per cluster, so a cluster's start does not depend on the clusters run before it (CPU count, order)
+    rng = np.random.RandomState(seed)
+    x_init = locs_[index, 0] + rng.uniform(low=-1, high=1, size=max_num_event) * sigma_x
+    y_init = locs_[index, 1] + rng.uniform(low=-1, high=1, size=max_num_event) * sigma_y
     z_init = (
         np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
         # + np.random.uniform(low=-1, high=1, size=max_num_event) * (config["z(km)"][1] - config["z(km)"][0]) / 6.0
