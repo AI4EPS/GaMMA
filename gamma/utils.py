@@ -193,7 +193,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         config["ncpu"] = min(mp.cpu_count(), config["ncpu"])
 
     if config["ncpu"] == 1:
-        event_idx = 0
+        # event_idx0 - 1 as event_idx is increased before use, as in the parallel path
+        event_idx = event_idx0 - 1
         events, assignment = [], []
         for unique_label in tqdm(list(unique_labels), desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster"):
             events_, assignment_ = associate(
