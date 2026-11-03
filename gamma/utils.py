@@ -2,7 +2,7 @@ import multiprocessing as mp
 import platform
 import random
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -12,11 +12,6 @@ from tqdm import tqdm
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
 from .seismic_ops import calc_amp, calc_time, initialize_eikonal
-
-to_seconds = lambda t: t.timestamp(tz="UTC")
-from_seconds = lambda t: pd.Timestamp.utcfromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]
-# to_seconds = lambda t: datetime.strptime(t, "%Y-%m-%dT%H:%M:%S.%f").timestamp()
-# from_seconds = lambda t: [datetime.utcfromtimestamp(x).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] for x in t]
 
 
 def random_seed():
@@ -54,7 +49,8 @@ def estimate_eps(stations, vp, sigma=2.0):
 def convert_picks_csv(picks, stations, config):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
     if type(picks["timestamp"].iloc[0]) is str:
-        picks.loc[:, "timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
+        # replace the column: writing datetimes into a string column in place fails on pandas >= 3
+        picks["timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
     t = (
         picks["timestamp"]
         .apply(lambda x: x.tz_convert("UTC").timestamp() if x.tzinfo is not None else x.tz_localize("UTC").timestamp())
@@ -197,10 +193,9 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         config["ncpu"] = min(mp.cpu_count(), config["ncpu"])
 
     if config["ncpu"] == 1:
-        print(f"Associating {len(data)} picks with {config['ncpu']} CPUs")
         event_idx = 0
         events, assignment = [], []
-        for unique_label in list(unique_labels):
+        for unique_label in tqdm(list(unique_labels), desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster"):
             events_, assignment_ = associate(
                 unique_label,
                 labels,
@@ -225,8 +220,6 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         # event_idx0 - 1 as event_idx is increased before use
         event_idx = manager.Value("i", event_idx0 - 1)
 
-        print(f"Associating {len(unique_labels)} clusters with {config['ncpu']} CPUs")
-
         # the following sort and shuffle is to make sure jobs are distributed evenly
         counter = Counter(labels)
         unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
@@ -243,37 +236,45 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             context = "fork"
 
         with mp.get_context(context).Pool(config["ncpu"], initializer=random_seed) as p:
-            results = p.starmap(
-                associate,
+            args = [
                 [
-                    [
-                        k,
-                        labels,
-                        data,
-                        locs,
-                        phase_type,
-                        phase_weight,
-                        pick_idx,
-                        pick_station_id,
-                        config,
-                        timestamp0,
-                        vel,
-                        method,
-                        event_idx,
-                        lock,
-                    ]
-                    for k in unique_labels
-                ],
-                chunksize=chunk_size,
+                    k,
+                    labels,
+                    data,
+                    locs,
+                    phase_type,
+                    phase_weight,
+                    pick_idx,
+                    pick_station_id,
+                    config,
+                    timestamp0,
+                    vel,
+                    method,
+                    event_idx,
+                    lock,
+                ]
+                for k in unique_labels
+            ]
+            # imap (in order, like starmap) so a progress bar can follow the clusters as they finish
+            progress = tqdm(
+                p.imap(_associate_star, args, chunksize=chunk_size),
+                total=len(args),
+                desc=f"Associating {len(data)} picks ({config['ncpu']} CPUs)",
+                unit="cluster",
             )
             # resuts is a list of tuples, each tuple contains two lists events and assignment
             # here we flatten the list of tuples into two lists
             events, assignment = [], []
-            for each_events, each_assignment in results:
+            for each_events, each_assignment in progress:
                 events.extend(each_events)
                 assignment.extend(each_assignment)
 
+    print(f"Associated {len(events)} events with {len(assignment)} picks")
     return events, assignment  # , event_idx.value
+
+
+def _associate_star(args):
+    return associate(*args)
 
 
 def associate(
@@ -292,8 +293,6 @@ def associate(
     event_idx,
     lock=None,
 ):
-    print(".", end="")
-
     data_ = data[labels == k]
     locs_ = locs[labels == k]
     phase_type_ = phase_type[labels == k]
@@ -397,7 +396,7 @@ def associate(
             random_state=random_state,
         ).fit(data_)
     else:
-        raise (f"Unknown method {method}; Should be 'BGMM' or 'GMM'")
+        raise ValueError(f"Unknown method {method}; Should be 'BGMM' or 'GMM'")
 
     ## run prediction
     pred = gmm.predict(data_)
@@ -505,10 +504,9 @@ def associate(
                 event_idx_value = event_idx
 
         event = {
-            # "time": from_seconds(gmm.centers_[i, len(config["dims"])]),
-            "time": datetime.utcfromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0).isoformat(
-                timespec="milliseconds"
-            ),
+            "time": datetime.fromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0, timezone.utc)
+            .replace(tzinfo=None)
+            .isoformat(timespec="milliseconds"),
             # "time(s)": gmm.centers_[i, len(config["dims"])],
             "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
             "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
@@ -527,8 +525,6 @@ def associate(
         for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
             assignment.append((pi, event_idx_value, pr))
 
-        if (event_idx_value + 1) % 100 == 0:
-            print(f"\nAssociated {event_idx_value + 1} events")
     return events, assignment
 
 
@@ -649,7 +645,7 @@ def init_centers(config, data_, locs_, type_, weight_, max_num_event=1):
     elif config["dims"] == ["x(km)"]:
         centers_init = np.vstack([x_init, t_init]).T
     else:
-        raise (ValueError("Unsupported dims"))
+        raise ValueError("Unsupported dims")
 
     if config["use_amplitude"]:
         centers_init = np.hstack([centers_init, 1.0 * np.ones((len(centers_init), 1))])  # init magnitude to 1.0

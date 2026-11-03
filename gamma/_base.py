@@ -272,21 +272,7 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                     best_lower_bounds = current_lower_bounds
                     self.converged_ = converged
 
-        # Should only warn about convergence if max_iter > 0, otherwise
-        # the user is assumed to have used 0-iters initialization
-        # to get the initial means.
-        if not self.converged_ and self.max_iter > 0:
-            # warnings.warn(
-            #     (
-            #         "Initialization did not converge."
-            #         # "Best performing initialization did not converge. "
-            #         # "Try different init parameters, or increase max_iter, "
-            #         # "tol, or check for degenerate data."
-            #     ),
-            #     ConvergenceWarning,
-            # )
-            print("x")
-
+        # A fit that did not converge is kept as is; self.converged_ records it.
         self._set_parameters(best_params)
         self.n_iter_ = best_n_iter
         self.lower_bound_ = max_lower_bound
