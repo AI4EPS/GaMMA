@@ -43,13 +43,12 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
   - **initial_points** (default=[1,1,1] for (x, y, z) directions): Initial earthquake locations (cluster centers). For a large area over 10 degrees, more initial points are helpful, such as [2,2,1].
   - **covariance_prior** (default = (5, 5)): covariance prior of time and amplitude residuals. As the code supports only a uniform or 1D velocity model, a large covariance prior can be used to avoid splitting one event into multiple events.
-  - Filtering low quality association
+  - Filtering low quality association: each event is relocated on its own picks; picks with residuals above the limits below are dropped and the event relocated again, until its picks stop changing. The event is kept if enough picks remain.
     - **min_picks_per_eq**: Minimum picks for associated earthquakes. We can also specify minimum P or S picks:
   	- **min_p_picks_per_eq**: Minimum P-picks for associated earthquakes.
   	- **min_s_picks_per_eq**: Minimum S-picks for associated earthquakes.
-    - **max_sigma11**: Max phase time residual (s)
-    - **max_sigma22**: Max phase amplitude residual (in *log* scale)
-    - **max_sigma12**: Max covariance term. (Usually not used)
+    - **max_residual_time** (default = 1.0): Max phase time residual (s)
+    - **max_residual_amplitude** (default = 1.0): Max phase amplitude residual (log10 scale)
 
 Note the association speed is controlled by **dbscan_eps** and **oversampling_factor**. Larger values are preferred, but at the expense of a slower association speed.
 
