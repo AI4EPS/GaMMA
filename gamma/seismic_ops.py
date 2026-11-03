@@ -389,7 +389,17 @@ def initialize_eikonal(config):
     return config
 
 
-def initialize_centers(X, phase_type, phase_weight, centers_init, station_locs, sigma=1.0, random_state=None):
+def initialize_centers(
+    X,
+    phase_type,
+    phase_weight,
+    centers_init,
+    station_locs,
+    sigma=1.0,
+    random_state=None,
+    vel={"p": 6.0, "s": 6.0 / 1.75},
+    eikonal=None,
+):
     n_samples, n_features = X.shape
     n_components, _ = centers_init.shape
     centers = centers_init.copy()
@@ -397,9 +407,9 @@ def initialize_centers(X, phase_type, phase_weight, centers_init, station_locs, 
     means = np.zeros([n_components, n_samples, n_features])
     for i in range(n_components):
         if n_features == 1:  # (time,)
-            means[i, :, :] = calc_time(centers_init[i : i + 1, :], station_locs, phase_type)
+            means[i, :, :] = calc_time(centers_init[i : i + 1, :], station_locs, phase_type, vel=vel, eikonal=eikonal)
         elif n_features == 2:  # (time, amp)
-            means[i, :, 0:1] = calc_time(centers_init[i : i + 1, :-1], station_locs, phase_type)
+            means[i, :, 0:1] = calc_time(centers_init[i : i + 1, :-1], station_locs, phase_type, vel=vel, eikonal=eikonal)
             means[i, :, 1:2] = X[:, 1:2]
             # means[i, :, 1:2] = calc_amp(self.centers_init[i, -1:], self.centers_init[i:i+1, :-1], self.station_locs)
         else:

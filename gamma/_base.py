@@ -137,8 +137,11 @@ class BaseMixture(DensityMixin, BaseEstimator, metaclass=ABCMeta):
                 self.phase_weight,
                 self.centers_init,
                 self.station_locs,
-                np.sqrt(self.covariance_prior[0][0]),
+                # BGMM: the prior's time width; GMM has no prior and uses the default width of 1 s
+                np.sqrt(self.covariance_prior[0][0]) if hasattr(self, "covariance_prior") else 1.0,
                 random_state,
+                vel=self.vel,
+                eikonal=self.eikonal,
             )
             self.centers_init = centers
 
