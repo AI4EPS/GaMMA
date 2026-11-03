@@ -298,46 +298,26 @@ def _estimate_gaussian_parameters(
         centers_prev = np.dot(resp.T, np.hstack([station_locs, X])) / nk[:, np.newaxis]
     centers = np.zeros_like(centers_prev)  # x, y, z, t, amp, ...
 
-    for i in range(len(centers_prev)):
-        if n_features == 1:
-            loc, loss = calc_loc(
-                X[:, :1],
-                phase_type,
-                station_locs,
-                resp[:, i : i + 1] * phase_weight[:, np.newaxis],
-                centers_prev[i : i + 1, :],
-                vel=vel,
-                bounds=bounds,
-                eikonal=eikonal,
-            )
-            centers[i : i + 1, :] = loc
-        elif n_features == 2:
-            loc, loss = calc_loc(
-                X[:, :1],
-                phase_type,
-                station_locs,
-                resp[:, i : i + 1] * phase_weight[:, np.newaxis],
-                centers_prev[i : i + 1, :-1],
-                vel=vel,
-                bounds=bounds,
-                eikonal=eikonal,
-            )
-            centers[i : i + 1, :-1] = loc
-            centers[i : i + 1, -1:] = calc_mag(
-                X[:, 1:2], centers[i : i + 1, :-1], station_locs, resp[:, i : i + 1] * phase_weight[:, np.newaxis]
-            )
-        else:
-            raise ValueError(f"n_features = {n_features} > 2!")
+    if n_features not in (1, 2):
+        raise ValueError(f"n_features = {n_features} > 2!")
+    ndim = station_locs.shape[1]
+    weight = resp * phase_weight[:, np.newaxis]  # (N, K)
+    # all K locations at once (calc_loc_batch), instead of one L-BFGS-B solve per component over all N picks
+    centers[:, : ndim + 1], _ = calc_loc_batch(
+        X[:, :1], phase_type, station_locs, weight, centers_prev[:, : ndim + 1], vel=vel, eikonal=eikonal, bounds=bounds
+    )
+    if n_features == 2:
+        centers[:, -1] = calc_mag_batch(X[:, 1:2], centers[:, :ndim], station_locs, weight)
 
-    means = np.zeros([resp.shape[1], X.shape[0], X.shape[1]])
-    for i in range(len(centers)):
-        if n_features == 1:
-            means[i, :, :] = calc_time(centers[i : i + 1, :], station_locs, phase_type, vel=vel, eikonal=eikonal)
-        elif n_features == 2:
-            means[i, :, 0:1] = calc_time(centers[i : i + 1, :-1], station_locs, phase_type, vel=vel, eikonal=eikonal)
-            means[i, :, 1:2] = calc_amp(centers[i : i + 1, -1:], centers[i : i + 1, :-1], station_locs)
-        else:
-            raise ValueError(f"n_features = {n_features} > 2!")
+    # means (K, N, n_features): predicted time (and amplitude) of every pick under every component
+    K, N = len(centers), len(X)
+    means = np.zeros([K, N, n_features])
+    t, _ = traveltime_grad(
+        np.repeat(centers[:, :ndim], N, axis=0), np.tile(station_locs, (K, 1)), np.tile(phase_type, K), vel, eikonal
+    )
+    means[:, :, 0] = t.reshape(K, N) + centers[:, ndim : ndim + 1]
+    if n_features == 2:
+        means[:, :, 1] = calc_amp(centers[:, None, -1:], centers[:, None, : ndim + 1], station_locs)[..., 0]
     covariances = {
         "full": _estimate_gaussian_covariances_full,
         "tied": _estimate_gaussian_covariances_tied,

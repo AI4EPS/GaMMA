@@ -3,6 +3,7 @@ from pathlib import Path
 
 import numpy as np
 import scipy.optimize
+import scipy.sparse
 from numba import njit
 
 # import shelve
@@ -166,7 +167,7 @@ def calc_mag(data, event_loc, station_loc, weight, min=-2, max=8):
 
 
 def calc_amp(mag, event_loc, station_loc):
-    dist = np.linalg.norm(event_loc[:, :-1] - station_loc, axis=-1, keepdims=True)
+    dist = np.linalg.norm(event_loc[..., :-1] - station_loc, axis=-1, keepdims=True)
     # logA = mag + 2.48 - 2.76 * np.log10(dist)
     ## Picozzi et al. (2018) A rapid response magnitude scale...
     c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
@@ -238,6 +239,83 @@ def calc_loc(
     )
 
     return opt.x[np.newaxis, :], opt.fun
+
+
+def calc_loc_batch(
+    phase_time,
+    phase_type,
+    station_loc,
+    weight,
+    centers,
+    vel={"p": 6.0, "s": 6.0 / 1.75},
+    eikonal=None,
+    bounds=None,
+    sigma=1.0,
+    max_iter=50,
+    tol=1e-3,
+    min_weight=1e-4,
+):
+    """calc_loc for all K components at once: the same Huber loss, minimized by projected Levenberg-Marquardt on the
+    IRLS Gauss-Newton system, warm-started at centers. A step is kept only if it lowers that component's loss, and a
+    coordinate at its bound with the gradient pushing outward is held fixed (an active set, as in L-BFGS-B).
+
+    phase_time (N, 1), station_loc (N, D), weight (N, K) = responsibility x pick weight, centers (K, D + 1) as
+    (location, origin time). Only pairs with weight > min_weight enter, so the cost is O(N), not O(N K)."""
+    K, D1 = centers.shape
+    nn, kk = np.nonzero(weight > min_weight)  # active (pick, component) pairs
+    w, t_obs, sta, ph = weight[nn, kk], phase_time[nn, 0], station_loc[nn], np.asarray(phase_type)[nn]
+    lo = np.array([-np.inf if b[0] is None else b[0] for b in bounds]) if bounds is not None else np.full(D1, -np.inf)
+    hi = np.array([np.inf if b[1] is None else b[1] for b in bounds]) if bounds is not None else np.full(D1, np.inf)
+    eye = np.eye(D1)
+
+    def huber(x):  # loss (K,), residuals (P,), Jacobian (P, D + 1)
+        t, g = traveltime_grad(x[kk, :-1], sta, ph, vel, eikonal)
+        r = t + x[kk, -1] - t_obs
+        a = np.abs(r)
+        loss = np.bincount(kk, w * np.where(a <= sigma, 0.5 * r**2, sigma * a - 0.5 * sigma**2), minlength=K)
+        return loss, r, np.column_stack([g, np.ones(len(r))])
+
+    S = scipy.sparse.csr_matrix((np.ones(len(kk)), (kk, np.arange(len(kk)))), shape=(K, len(kk)))  # component <- pair
+
+    def per_component(v):  # sum over the pairs of each component: (P, ...) -> (K, ...)
+        return (S @ v.reshape(len(v), -1)).reshape(K, *v.shape[1:])
+
+    x = np.clip(centers, lo, hi)
+    loss, r, J = huber(x)
+    lam = np.full(K, 1e-2)
+    for _ in range(max_iter):
+        omega = w * np.minimum(1.0, sigma / np.maximum(np.abs(r), 1e-12))  # IRLS weights of the Huber loss
+        H = per_component(omega[:, None, None] * J[:, :, None] * J[:, None, :])  # (K, D1, D1) Gauss-Newton Hessian
+        g = per_component((omega * r)[:, None] * J)  # (K, D1) gradient
+        fixed = ((x <= lo) & (g > 0)) | ((x >= hi) & (g < 0))
+        g = np.where(fixed, 0.0, g)
+        H = np.where(fixed[:, :, None] | fixed[:, None, :], 0.0, H) + fixed[:, :, None] * eye
+        H = H + (lam[:, None] * np.einsum("kii->ki", H) + 1e-9)[:, :, None] * eye  # Marquardt damping
+        step = -np.linalg.solve(H, g[..., None])[..., 0]
+        x_new = np.clip(x + step, lo, hi)
+        loss_new = huber(x_new)[0]
+        ok = loss_new <= loss
+        gain = (loss - loss_new) / np.maximum(loss, 1e-12)  # relative decrease of an accepted step
+        x = np.where(ok[:, None], x_new, x)
+        lam = np.where(ok, lam / 3, lam * 4)
+        # converged: the proposed step is below tol (accepted or not), damping has made the step negligible, or the
+        # loss no longer decreases (a flat direction of a poorly constrained component; scipy's ftol)
+        if np.all((np.abs(step).max(axis=1) < tol) | (lam > 1e6) | (ok & (gain < 1e-7))):
+            break
+        loss, r, J = huber(x)
+    return x, huber(x)[0]
+
+
+def calc_mag_batch(amp, event_loc, station_loc, weight, min=-2, max=8):
+    """calc_mag for all K components: amp (N, 1), event_loc (K, D), station_loc (N, D), weight (N, K) -> (K,)"""
+    dist = np.linalg.norm(event_loc[:, None, :] - station_loc[None, :, :], axis=-1)  # (K, N)
+    c0, c1, c3 = 1.08, 0.93, -1.68  # Picozzi et al. (2018), as in calc_mag
+    mag_ = (amp[:, 0][None, :] - c0 - c3 * np.log10(np.maximum(dist, 0.1))) / c1 + 3.5
+    w = weight.T
+    mu = (mag_ * w).sum(1, keepdims=True) / (w.sum(1, keepdims=True) + 1e-6)
+    std = np.sqrt(((mag_ - mu) ** 2 * w).sum(1, keepdims=True) / (w.sum(1, keepdims=True) + 1e-12))
+    w = w * (np.abs(mag_ - mu) <= 2 * std)
+    return np.clip((mag_ * w).sum(1) / (w.sum(1) + 1e-6), min, max)
 
 
 def initialize_eikonal(config):
