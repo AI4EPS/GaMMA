@@ -522,7 +522,7 @@ def associate(
             event[k] = gmm.centers_[i, j]
         events.append(event)
 
-        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob):
+        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob[pred == i][idx_filter]):  # each pick's own score
             assignment.append((pi, event_idx_value, pr))
 
     return events, assignment
