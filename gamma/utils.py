@@ -1,6 +1,8 @@
 import multiprocessing as mp
+import os
 import platform
 import random
+import tempfile
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -231,33 +233,32 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         else:
             context = "fork"
 
-        with mp.get_context(context).Pool(config["ncpu"]) as p:
-            args = [
-                [
-                    k,
-                    labels,
-                    data,
-                    locs,
-                    phase_type,
-                    phase_weight,
-                    pick_idx,
-                    pick_station_id,
-                    config,
-                    timestamp0,
-                    vel,
-                    method,
-                    -1,  # each cluster numbers its events from 0; renumbered below
-                ]
-                for k in unique_labels
-            ]
-            # imap (in order, like starmap) so a progress bar can follow the clusters as they finish
-            progress = tqdm(
-                p.imap(_associate_star, args, chunksize=chunk_size),
-                total=len(args),
-                desc=f"Associating {len(data)} picks ({config['ncpu']} CPUs)",
-                unit="cluster",
-            )
-            results = dict(zip(unique_labels, progress))
+        # each task carries only its cluster's picks; config, timestamp0, vel and method reach each worker once through
+        # the initializer. The eikonal tables (MBs) go through a memory-mapped file instead: in the initializer's
+        # arguments they would block the parent until each worker had booted, one worker after another.
+        with tempfile.TemporaryDirectory() as tmp:
+            shared_config, tables = config, None
+            if config["eikonal"] is not None:
+                tables = os.path.join(tmp, "eikonal_tt.npy")
+                np.save(tables, config["eikonal"]["tt"])
+                eikonal = {k: v for k, v in config["eikonal"].items() if k not in ("tt", "up", "us")}
+                shared_config = {**config, "eikonal": eikonal}
+            shared = (shared_config, timestamp0, vel, method, tables)
+            with mp.get_context(context).Pool(config["ncpu"], initializer=_init_worker, initargs=(shared,)) as p:
+                args = []
+                for k in unique_labels:
+                    idx = labels == k
+                    args.append(
+                        (k, data[idx], locs[idx], phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx])
+                    )
+                # imap (in order, like starmap) so a progress bar can follow the clusters as they finish
+                progress = tqdm(
+                    p.imap(_associate_cluster, args, chunksize=chunk_size),
+                    total=len(args),
+                    desc=f"Associating {len(data)} picks ({config['ncpu']} CPUs)",
+                    unit="cluster",
+                )
+                results = dict(zip(unique_labels, progress))
 
         # number events in cluster order from event_idx0, as the serial path does, not in the order clusters finish
         events, assignment, event_idx = [], [], event_idx0
@@ -273,8 +274,23 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     return events, assignment  # , event_idx.value
 
 
-def _associate_star(args):
-    return associate(*args)
+_SHARED = None  # (config, timestamp0, vel, method), set once per worker
+
+
+def _init_worker(shared):
+    global _SHARED
+    config, timestamp0, vel, method, tables = shared
+    if tables is not None:  # the eikonal tables, shared through the page cache rather than copied
+        config["eikonal"]["tt"] = np.load(tables, mmap_mode="r")
+    _SHARED = (config, timestamp0, vel, method)
+
+
+def _associate_cluster(task):
+    """associate() on one cluster's picks; its events are numbered from 0 and renumbered by the caller"""
+    k, data, locs, phase_type, phase_weight, pick_idx, pick_station_id = task
+    config, timestamp0, vel, method = _SHARED
+    labels = np.full(len(data), k)
+    return associate(k, labels, data, locs, phase_type, phase_weight, pick_idx, pick_station_id, config, timestamp0, vel, method, -1)
 
 
 def associate(
