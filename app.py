@@ -79,9 +79,8 @@ def set_config(region="ridgecrest"):
             "min_picks_per_eq": 5,
             "min_p_picks_per_eq": 0,
             "min_s_picks_per_eq": 0,
-            "max_sigma11": 3.0,
-            "max_sigma22": 1.0,
-            "max_sigma12": 1.0,
+            "max_residual_time": 1.0,
+            "max_residual_amplitude": 1.0,
         }
     )
 

@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
-from .seismic_ops import calc_amp, calc_time, initialize_eikonal
+from .seismic_ops import calc_amp, calc_loc_batch, calc_mag_batch, calc_time, initialize_eikonal
 
 
 def random_seed():
@@ -151,6 +151,11 @@ def hierarchical_dbscan_clustering(
 
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
+    retired = {"max_sigma11": "max_residual_time", "max_sigma22": "max_residual_amplitude", "max_sigma12": None}
+    for old, new in retired.items():  # fail loudly: a silently ignored limit would change the catalogue unseen
+        if old in config:
+            raise ValueError(f"config['{old}'] is retired; " + (f"use config['{new}']" if new else "remove it"))
+
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
         picks, stations, config
     )
@@ -307,7 +312,6 @@ def associate(
     vel,
     method,
     event_idx,
-    lock=None,
 ):
     data_ = data[labels == k]
     locs_ = locs[labels == k]
@@ -418,130 +422,77 @@ def associate(
     pred = gmm.predict(data_)
     prob = np.exp(gmm.score_samples(data_))
     prob_matrix = gmm.predict_proba(data_)
-    prob_eq = prob_matrix.sum(axis=0)
     #  prob = prob_matrix[range(len(data_)), pred]
     #  score = gmm.score(data_)
     #  score_sample = gmm.score_samples(data_)
 
-    ## filtering
-    events = []
-    assignment = []
-
-    # for i in range(len(centers_init)):
+    ## post-filter: refit each event on its picks, drop the picks off the fit, keep the events with enough picks left
+    D = len(config["dims"])
+    events, assignment = [], []
     for i in range(max_num_event):
-        tmp_data = data_[pred == i]
-        tmp_locs = locs_[pred == i]
-        tmp_pick_station_id = pick_station_id_[pred == i]
-        tmp_phase_type = phase_type_[pred == i]
-        # tmp_phase_weight = phase_weight_[pred == i]
-        if (len(tmp_data) == 0) or (len(tmp_data) < config["min_picks_per_eq"]):
-            # if (len(tmp_data) == 0) or (np.sum(tmp_phase_weight) < config["min_picks_per_eq"]):
+        idx = np.flatnonzero(pred == i)
+        if len(idx) < config["min_picks_per_eq"]:
             continue
-        # idx_filter = np.ones(len(tmp_data)).astype(bool)
-
-        ## filter by time
-        t_ = calc_time(
-            gmm.centers_[i : i + 1, : len(config["dims"]) + 1],
-            tmp_locs,
-            tmp_phase_type,
-            vel=vel,
-            eikonal=config["eikonal"],
+        keep, center, res = refit_event(
+            gmm.centers_[i], data_[idx], locs_[idx], phase_type_[idx], phase_weight_[idx], config, vel
         )
-        diff_t = np.abs(t_ - tmp_data[:, 0:1])
-        idx_t = (diff_t < config["max_sigma11"]).squeeze(axis=1)
-        idx_filter = idx_t
-        if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
-            # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
+        idx, res, ph = idx[keep], res[keep], phase_type_[idx[keep]]
+        if (
+            len(idx) < config["min_picks_per_eq"]
+            or np.sum(ph == "p") < config.get("min_p_picks_per_eq", 0)
+            or np.sum(ph == "s") < config.get("min_s_picks_per_eq", 0)
+            or len(np.unique(locs_[idx], axis=0)) < config.get("min_stations", 0)
+        ):
             continue
 
-        ## filter multiple picks at the same station
-        unique_sta_id = {}
-        for j, k in enumerate(tmp_pick_station_id):
-            if (k not in unique_sta_id) or (diff_t[j] < unique_sta_id[k][1]):
-                unique_sta_id[k] = (j, diff_t[j])
-        idx_s = np.zeros(len(idx_t)).astype(bool)  ## based on station
-        for k in unique_sta_id:
-            idx_s[unique_sta_id[k][0]] = True
-        idx_filter = idx_filter & idx_s
-        if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
-            # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
-            continue
-        gmm.covariances_[i, 0, 0] = np.mean((diff_t[idx_t]) ** 2)
-
-        ## filter by amplitude
-        if config["use_amplitude"]:
-            a_ = calc_amp(
-                gmm.centers_[i : i + 1, len(config["dims"]) + 1 : len(config["dims"]) + 2],
-                gmm.centers_[i : i + 1, : len(config["dims"]) + 1],
-                tmp_locs,
-            )
-            diff_a = np.abs(a_ - tmp_data[:, 1:2])
-            idx_a = (diff_a < config["max_sigma22"]).squeeze()
-            idx_filter = idx_filter & idx_a
-            if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
-                # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
-                continue
-
-            if "max_sigma12" in config:
-                idx_cov = np.abs(gmm.covariances_[i, 0, 1]) < config["max_sigma12"]
-                idx_filter = idx_filter & idx_cov
-                if len(tmp_data[idx_filter]) < config["min_picks_per_eq"]:
-                    # if np.sum(tmp_phase_weight[idx_filter]) < config["min_picks_per_eq"]:
-                    continue
-
-            gmm.covariances_[i, 1, 1] = np.mean((diff_a[idx_a]) ** 2)
-
-        if "min_p_picks_per_eq" in config:
-            if len(tmp_data[idx_filter & (tmp_phase_type == "p")]) < config["min_p_picks_per_eq"]:
-                # if np.sum(tmp_phase_weight[idx_filter & (tmp_phase_type == "p")]) < config["min_p_picks_per_eq"]:
-                continue
-        if "min_s_picks_per_eq" in config:
-            if len(tmp_data[idx_filter & (tmp_phase_type == "s")]) < config["min_s_picks_per_eq"]:
-                # if np.sum(tmp_phase_weight[idx_filter & (tmp_phase_type == "s")]) < config["min_s_picks_per_eq"]:
-                continue
-        if "min_stations" in config:
-            if len(np.unique(tmp_locs[idx_filter], axis=0)) < config["min_stations"]:
-                continue
-
-        if lock is not None:
-            with lock:
-                if not isinstance(event_idx, int):
-                    event_idx.value += 1
-                    event_idx_value = event_idx.value
-                else:
-                    event_idx += 1
-                    event_idx_value = event_idx
-        else:
-            if not isinstance(event_idx, int):
-                event_idx.value += 1
-                event_idx_value = event_idx.value
-            else:
-                event_idx += 1
-                event_idx_value = event_idx
-
+        event_idx += 1
         event = {
-            "time": datetime.fromtimestamp(gmm.centers_[i, len(config["dims"])] + timestamp0, timezone.utc)
+            "time": datetime.fromtimestamp(center[D] + timestamp0, timezone.utc)
             .replace(tzinfo=None)
             .isoformat(timespec="milliseconds"),
-            # "time(s)": gmm.centers_[i, len(config["dims"])],
-            "magnitude": gmm.centers_[i, len(config["dims"]) + 1] if config["use_amplitude"] else 999,
-            "sigma_time": np.sqrt(gmm.covariances_[i, 0, 0]),
-            "sigma_amp": np.sqrt(gmm.covariances_[i, 1, 1]) if config["use_amplitude"] else 0,
-            "cov_time_amp": gmm.covariances_[i, 0, 1] if config["use_amplitude"] else 0,
-            "gamma_score": prob_eq[i],
-            "num_picks": len(tmp_data[idx_filter]),
-            "num_p_picks": len(tmp_data[idx_filter & (tmp_phase_type == "p")]),
-            "num_s_picks": len(tmp_data[idx_filter & (tmp_phase_type == "s")]),
-            "event_index": event_idx_value,
+            "magnitude": center[D + 1] if config["use_amplitude"] else 999,
+            "sigma_time": np.sqrt(np.mean(res[:, 0] ** 2)),
+            "sigma_amp": np.sqrt(np.mean(res[:, 1] ** 2)) if config["use_amplitude"] else 0,
+            "cov_time_amp": np.mean(res[:, 0] * res[:, 1]) if config["use_amplitude"] else 0,
+            "gamma_score": prob_matrix[idx, i].sum(),
+            "num_picks": len(idx),
+            "num_p_picks": int(np.sum(ph == "p")),
+            "num_s_picks": int(np.sum(ph == "s")),
+            "event_index": event_idx,
+            **dict(zip(config["dims"], center[:D])),
         }
-        for j, k in enumerate(config["dims"]):  ## add location
-            event[k] = gmm.centers_[i, j]
         events.append(event)
-
-        for pi, pr in zip(pick_idx_[pred == i][idx_filter], prob[pred == i][idx_filter]):  # each pick's own score
-            assignment.append((pi, event_idx_value, pr))
+        assignment.extend(zip(pick_idx_[idx], [event_idx] * len(idx), prob[idx]))  # each pick's own score
 
     return events, assignment
+
+
+def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_iter=5):
+    """ADLoc's RANSAC without the random sampling, since the mixture's centre is already a robust start: locate the
+    event on its kept picks, keep the picks within max_residual_time (s) and max_residual_amplitude (log10) of that
+    fit, and repeat until the kept picks stop changing. The 1.0 defaults are ~3 sigma of real PhaseNet residuals.
+
+    center (D + 1[+ 1],) = (location, time[, magnitude]); data (n, 1 or 2) = (time[, log amplitude]).
+    Returns the kept-pick mask (n,), the refitted center, and every pick's residuals (n, 1 or 2)."""
+    D = locs.shape[1]
+    keep = np.ones(len(data), bool)
+    for _ in range(max_iter):
+        w = phase_weight * keep[:, None]  # (n, 1)
+        loc, _ = calc_loc_batch(
+            data[:, :1], phase_type, locs, w, center[None, : D + 1], vel, config["eikonal"], config["bfgs_bounds"]
+        )
+        res = calc_time(loc, locs, phase_type, vel, config["eikonal"]) - data[:, :1]
+        ok = np.abs(res[:, 0]) < config.get("max_residual_time", 1.0)
+        if config["use_amplitude"]:
+            mag = calc_mag_batch(data[:, 1:2], loc[:, :D], locs, w)
+            res = np.hstack([res, calc_amp(mag, loc, locs) - data[:, 1:2]])
+            ok &= np.abs(res[:, 1]) < config.get("max_residual_amplitude", 1.0)
+            loc = np.hstack([loc, mag[:, None]])
+        center = loc[0]
+        if (ok == keep).all() or ok.sum() < 4:  # converged, or too few picks left to locate
+            break
+        keep = ok
+    return ok, center, res
 
 
 # def init_centers(config, data_, locs_, time_range, max_num_event=1):
