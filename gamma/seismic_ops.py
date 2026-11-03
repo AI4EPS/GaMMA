@@ -87,115 +87,47 @@ def eikonal_solve(u, f, h):
 
 ###################################### Traveltime based on Eikonal Timetable ######################################
 @njit
-def _get_index(ir, iz, nr, nz, order="C"):
-    assert np.all(ir >= 0) and np.all(ir < nr)
-    assert np.all(iz >= 0) and np.all(iz < nz)
-    if order == "C":
-        return ir * nz + iz
-    elif order == "F":
-        return iz * nr + ir
-    else:
-        raise ValueError("order must be either C or F")
+def _bilinear(tt, iph, r, z, r0, z0, h):
+    """Time and its exact derivatives (dt/dr, dt/dz) of the bilinear interpolant of tables tt (phase, nr, nz), so the
+    optimizer sees a consistent pair (as in ADLoc). Beyond the grid the edge cell's bilinear form continues, so the
+    gradient never vanishes there."""
+    n = r.shape[0]
+    nr, nz = tt.shape[1], tt.shape[2]
+    t, tr, tz = np.empty(n), np.empty(n), np.empty(n)
+    for k in range(n):
+        p = iph[k]
+        x, y = (r[k] - r0) / h, (z[k] - z0) / h
+        i = min(max(int(np.floor(x)), 0), nr - 2)
+        j = min(max(int(np.floor(y)), 0), nz - 2)
+        fx, fy = x - i, y - j
+        t00, t10, t01, t11 = tt[p, i, j], tt[p, i + 1, j], tt[p, i, j + 1], tt[p, i + 1, j + 1]
+        c = t11 - t10 - t01 + t00
+        t[k] = t00 + (t10 - t00) * fx + (t01 - t00) * fy + c * fx * fy
+        tr[k] = ((t10 - t00) + c * fy) / h
+        tz[k] = ((t01 - t00) + c * fx) / h
+    return t, tr, tz
 
 
-def test_get_index():
-    vr, vz = np.meshgrid(np.arange(10), np.arange(20), indexing="ij")
-    vr = vr.flatten()
-    vz = vz.flatten()
-    nr = 10
-    nz = 20
-    for ir in range(nr):
-        for iz in range(nz):
-            assert vr[_get_index(ir, iz, nr, nz)] == ir
-            assert vz[_get_index(ir, iz, nr, nz)] == iz
-
-
-@njit
-def _interp(time_table, r, z, rgrid0, zgrid0, nr, nz, h):
-    ir0 = np.floor((r - rgrid0) / h).clip(0, nr - 2).astype(np.int64)
-    iz0 = np.floor((z - zgrid0) / h).clip(0, nz - 2).astype(np.int64)
-    r = r.clip(rgrid0, rgrid0 + (nr - 1) * h)
-    z = z.clip(zgrid0, zgrid0 + (nz - 1) * h)
-    # ir0 = ((r - rgrid0) / h).astype(np.int64)
-    # iz0 = ((z - zgrid0) / h).astype(np.int64)
-    ir1 = ir0 + 1
-    iz1 = iz0 + 1
-
-    ## https://en.wikipedia.org/wiki/Bilinear_interpolation
-    x1 = ir0 * h + rgrid0
-    x2 = ir1 * h + rgrid0
-    z1 = iz0 * h + zgrid0
-    z2 = iz1 * h + zgrid0
-
-    Q11 = time_table[_get_index(ir0, iz0, nr, nz)]
-    Q12 = time_table[_get_index(ir0, iz1, nr, nz)]
-    Q21 = time_table[_get_index(ir1, iz0, nr, nz)]
-    Q22 = time_table[_get_index(ir1, iz1, nr, nz)]
-
-    t = (
-        1
-        / (x2 - x1)
-        / (z2 - z1)
-        * (
-            Q11 * (x2 - r) * (z2 - z)
-            + Q21 * (r - x1) * (z2 - z)
-            + Q12 * (x2 - r) * (z - z1)
-            + Q22 * (r - x1) * (z - z1)
-        )
-    )
-
-    return t
+def traveltime_grad(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75}, eikonal=None):
+    """Travel times (n,) and their gradients w.r.t. the event location (n, ndim) for paired (or broadcast) event and
+    station locations (n, ndim): straight rays at vel, or the eikonal tables (3-D locations only)."""
+    d = event_loc - station_loc  # (n, ndim)
+    is_s = np.asarray(phase_type) == "s"
+    if eikonal is None:
+        v = np.where(is_s, vel["s"], vel["p"])
+        dist = np.linalg.norm(d, axis=-1)
+        return dist / v, d / (dist + 1e-6)[:, None] / v[:, None]
+    r = np.hypot(d[:, 0], d[:, 1])
+    t, tr, tz = _bilinear(eikonal["tt"], is_s.astype(np.int64), r, d[:, 2], eikonal["rgrid"][0], eikonal["zgrid"][0], eikonal["h"])
+    return t, np.column_stack([tr * d[:, 0] / (r + 1e-6), tr * d[:, 1] / (r + 1e-6), tz])
 
 
 def traveltime(event_loc, station_loc, phase_type, eikonal):
-    r = np.linalg.norm(event_loc[:, :2] - station_loc[:, :2], axis=-1, keepdims=False)
-    z = event_loc[:, 2] - station_loc[:, 2]
-
-    rgrid0 = eikonal["rgrid"][0]
-    zgrid0 = eikonal["zgrid"][0]
-    nr = eikonal["nr"]
-    nz = eikonal["nz"]
-    h = eikonal["h"]
-
-    if isinstance(phase_type, list):
-        phase_type = np.array(phase_type)
-    p_index = phase_type == "p"
-    s_index = phase_type == "s"
-    tt = np.zeros(len(phase_type), dtype=np.float32)
-    tt[phase_type == "p"] = _interp(eikonal["up"], r[p_index], z[p_index], rgrid0, zgrid0, nr, nz, h)
-    tt[phase_type == "s"] = _interp(eikonal["us"], r[s_index], z[s_index], rgrid0, zgrid0, nr, nz, h)
-    tt = tt[:, np.newaxis]
-
-    return tt
+    return traveltime_grad(event_loc[:, :3], station_loc, phase_type, eikonal=eikonal)[0][:, np.newaxis]
 
 
 def grad_traveltime(event_loc, station_loc, phase_type, eikonal):
-    r = np.linalg.norm(event_loc[:, :2] - station_loc[:, :2], axis=-1, keepdims=False)
-    z = event_loc[:, 2] - station_loc[:, 2]
-
-    rgrid0 = eikonal["rgrid"][0]
-    zgrid0 = eikonal["zgrid"][0]
-    nr = eikonal["nr"]
-    nz = eikonal["nz"]
-    h = eikonal["h"]
-
-    if isinstance(phase_type, list):
-        phase_type = np.array(phase_type)
-    p_index = phase_type == "p"
-    s_index = phase_type == "s"
-    dt_dr = np.zeros(len(phase_type))
-    dt_dz = np.zeros(len(phase_type))
-    dt_dr[p_index] = _interp(eikonal["grad_up"][0], r[p_index], z[p_index], rgrid0, zgrid0, nr, nz, h)
-    dt_dr[s_index] = _interp(eikonal["grad_us"][0], r[s_index], z[s_index], rgrid0, zgrid0, nr, nz, h)
-    dt_dz[p_index] = _interp(eikonal["grad_up"][1], r[p_index], z[p_index], rgrid0, zgrid0, nr, nz, h)
-    dt_dz[s_index] = _interp(eikonal["grad_us"][1], r[s_index], z[s_index], rgrid0, zgrid0, nr, nz, h)
-
-    dr_dxy = (event_loc[:, :2] - station_loc[:, :2]) / (r[:, np.newaxis] + 1e-6)
-    dt_dxy = dt_dr[:, np.newaxis] * dr_dxy
-
-    grad = np.column_stack((dt_dxy, dt_dz[:, np.newaxis]))
-
-    return grad
+    return traveltime_grad(event_loc[:, :3], station_loc, phase_type, eikonal=eikonal)[1]
 
 
 ############################################# Seismic Ops for GaMMA #####################################################################
@@ -348,35 +280,15 @@ def initialize_eikonal(config):
     up[ir0, iz0] = 0.0
     up = eikonal_solve(up, vp, h)
 
-    grad_up = np.gradient(up, h)
-
     us = 1000.0 * np.ones((nr, nz))
     us[ir0, iz0] = 0.0
     us = eikonal_solve(us, vs, h)
 
-    grad_us = np.gradient(us, h)
-
-    # with shelve.open(str(path / filename)) as db:
-    #     db["up"] = up
-    #     db["us"] = us
-    #     db["grad_up"] = grad_up
-    #     db["grad_us"] = grad_us
-    #     db["rgrid"] = rgrid
-    #     db["zgrid"] = zgrid
-    #     db["nr"] = nr
-    #     db["nz"] = nz
-    #     db["h"] = h
-
-    up = up.flatten()
-    us = us.flatten()
-    grad_up = np.array([grad_up[0].flatten(), grad_up[1].flatten()])
-    grad_us = np.array([grad_us[0].flatten(), grad_us[1].flatten()])
     config.update(
         {
-            "up": up,
-            "us": us,
-            "grad_up": grad_up,
-            "grad_us": grad_us,
+            "tt": np.stack([up, us]),  # (phase, nr, nz), read by traveltime_grad
+            "up": up.flatten(),
+            "us": us.flatten(),
             "rgrid": rgrid,
             "zgrid": zgrid,
             "nr": nr,
