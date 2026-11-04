@@ -42,7 +42,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   - **dbscan_min_samples** (default = 3): The number of samples in a neighborhood for a point to be considered as a core point. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
   - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
   - **initial_points** (default=[1,1,1] for (x, y, z) directions): Initial earthquake locations (cluster centers). For a large area over 10 degrees, more initial points are helpful, such as [2,2,1].
-  - **covariance_prior** (default = (5, 5)): covariance prior of time and amplitude residuals. As the code supports only a uniform or 1D velocity model, a large covariance prior can be used to avoid splitting one event into multiple events.
+  - **covariance_prior** (default = 5 × (1.5², 0.5²) = (11.25, 1.25)) and **degrees_of_freedom_prior** (default = 5): the Wishart prior on each event's time (s²) and amplitude (log10²) residuals, as in scikit-learn: degrees_of_freedom_prior pseudo-picks with spreads of 1.5 s and 0.5. A larger time spread merges events; a smaller one splits them.
   - Filtering low quality association: each event is relocated on its own picks; picks with residuals above the limits below are dropped and the event relocated again, until its picks stop changing. The event is kept if enough picks remain.
     - **min_picks_per_eq**: Minimum picks for associated earthquakes. We can also specify minimum P or S picks:
   	- **min_p_picks_per_eq**: Minimum P-picks for associated earthquakes.

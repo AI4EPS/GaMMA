@@ -797,7 +797,12 @@ class BayesianGaussianMixture(BaseMixture):
             0,
         )
 
-        return log_gauss + 0.5 * (log_lambda - n_features / self.mean_precision_)
+        # The event centres are point estimates (located by least squares in the M step), not Gaussian means with a
+        # posterior N(m_k, (beta_k Lambda_k)^-1) as in sklearn, so the mean-uncertainty term -n_features / (2 beta_k) is
+        # left out (the beta -> inf limit). With GaMMA's beta_k = nk it was -n_features / (2 nk), about -100 per pick
+        # at nk = 0.01: an event that briefly lost its picks could never win them back, so real events died early.
+        # return log_gauss + 0.5 * (log_lambda - n_features / self.mean_precision_)
+        return log_gauss + 0.5 * log_lambda
 
     def _compute_lower_bound(self, log_resp, log_prob_norm):
         """Estimate the lower bound of the model.
@@ -843,11 +848,13 @@ class BayesianGaussianMixture(BaseMixture):
         else:
             log_norm_weight = _log_dirichlet_norm(self.weight_concentration_)
 
+        # Point-estimate centres (see _estimate_log_prob): the matching bound term of q(mu) is left out too. With
+        # beta_k = nk it added about +35 for every emptied event, so the bound favoured fits with fewer events.
         return (
             -np.sum(np.exp(log_resp) * log_resp)
             - log_wishart
             - log_norm_weight
-            - 0.5 * n_features * np.sum(np.log(self.mean_precision_))
+            # - 0.5 * n_features * np.sum(np.log(self.mean_precision_))
         )
 
     def _get_parameters(self):
