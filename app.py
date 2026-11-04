@@ -84,7 +84,7 @@ def set_config(region="ridgecrest"):
         }
     )
 
-    config["use_dbscan"] = False
+    config["segment"] = None
     config["use_amplitude"] = True
     config["oversample_factor"] = 8.0
     config["dims"] = ["x(km)", "y(km)", "z(km)"]

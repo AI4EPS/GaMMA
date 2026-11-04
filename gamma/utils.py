@@ -8,12 +8,15 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+from scipy.sparse import coo_matrix
+from scipy.spatial import cKDTree
 from sklearn.cluster import DBSCAN
+from sklearn.neighbors import sort_graph_by_row_values
 from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
 from ._gaussian_mixture import GaussianMixture
-from .seismic_ops import calc_amp, calc_loc_batch, calc_mag_batch, calc_time, initialize_eikonal
+from .seismic_ops import calc_amp, calc_loc_batch, calc_mag_batch, calc_time, initialize_eikonal, traveltime_grad
 
 
 def random_seed():
@@ -150,8 +153,88 @@ def hierarchical_dbscan_clustering(
     return labels
 
 
+def link_picks(data, locs, phase_type, vel, max_km=100.0, tol=0.5):
+    """Pairs of picks that one event could produce, as a sparse distance graph for DBSCAN(metric="precomputed").
+    Stations closer than max_km link when the time difference fits the distance between them: same phase
+    |dt| <= dx / v + tol; P at i then S at j within -dx / vp - tol <= tS - tP <= max_km (1/vs - 1/vp) + dx / vs + tol.
+    Two picks at one station link only within tol, so two events there never link."""
+    vp, vs = vel["p"], vel["s"]
+    t, xy, s = data[:, 0], locs[:, :2], phase_type == "s"
+    sp_max = max_km * (1 / vs - 1 / vp)
+    reach = np.hypot((sp_max + max_km / vs + tol) * vs, max_km)  # every compatible pair is within this in (t vs, x, y)
+    i, j = cKDTree(np.column_stack([t * vs, xy])).query_pairs(reach, output_type="ndarray").T
+    dx, dt = np.linalg.norm(xy[i] - xy[j], axis=1), t[j] - t[i]
+    ps_ok = lambda d: (d >= -dx / vp - tol) & (d <= sp_max + dx / vs + tol)  # S minus P
+    ok = (dx <= max_km) & (
+        (~s[i] & ~s[j] & (np.abs(dt) <= dx / vp + tol))
+        | (s[i] & s[j] & (np.abs(dt) <= dx / vs + tol))
+        | (~s[i] & s[j] & ps_ok(dt))
+        | (s[i] & ~s[j] & ps_ok(-dt))
+    )
+    i, j = i[ok], j[ok]
+    n = np.arange(len(t))  # the zero diagonal stored up front: DBSCAN writes it, which would unsort the rows
+    d = np.r_[np.zeros(len(t)), np.full(2 * len(i), tol / 2)]
+    graph = coo_matrix((d, (np.r_[n, i, j], np.r_[n, j, i])), shape=(len(t), len(t))).tocsr()
+    return sort_graph_by_row_values(graph, warn_when_not_sorted=False)
+
+
+def focused_origin_time(data, locs, phase_type, vel, bw=1.0, grid_km=25.0, depth=5.0):
+    """Each pick's origin time if its event sat at R, u = t - tt(R, station, phase), for the grid point R (over the
+    picks' stations) that makes u sharpest: the most picks with another within +-bw. Picks of one event share u when
+    R is near it, so R focuses on the activity. R is searched coarse to fine: a 4 * grid_km grid, then grid_km around
+    its sharpest point (statewide, the full fine grid took most of the run time)."""
+    def sharpest(xs, ys):
+        best, R_best, u_best = -1, None, None
+        for x in xs:
+            for y in ys:
+                R = np.r_[x, y, depth][: locs.shape[1]]
+                u = data[:, 0] - traveltime_grad(np.broadcast_to(R, locs.shape), locs, phase_type, vel)[0]
+                us = np.sort(u)
+                sharp = np.sum(np.searchsorted(us, us + bw) - np.arange(len(us)))
+                if sharp > best:
+                    best, R_best, u_best = sharp, R, u
+        return R_best, u_best
+
+    lo, hi = locs[:, :2].min(0), locs[:, :2].max(0)
+    c = 4 * grid_km
+    R, _ = sharpest(np.arange(lo[0], hi[0] + c, c), np.arange(lo[1], hi[1] + c, c))
+    return sharpest(np.arange(R[0] - c, R[0] + c + 1e-6, grid_km), np.arange(R[1] - c, R[1] + c + 1e-6, grid_km))[1]
+
+
+def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=0.5, min_samples=3, bw=1.0):
+    """Cut the picks into small segments for the mixture, each holding whole events. Returns a list of index arrays.
+
+    Repeat on every piece until all are done:
+    1. Space: split the piece into groups of linked picks (DBSCAN on the links of link_picks: picks one event could
+       produce), which separates regions without breaking events; picks left as noise are dropped.
+    2. Time: a group above max_picks is cut at the quietest moment of its focused origin time u (the fewest picks
+       within +-bw; ties: the largest gap), and both halves go back to step 1."""
+    graph = link_picks(data, locs, phase_type, vel, max_km, tol)
+    segments, stack = [], [np.arange(len(data))]
+    while stack:
+        seg = stack.pop()
+        sub = graph[seg][:, seg]
+        labels = DBSCAN(eps=tol, min_samples=min_samples, metric="precomputed").fit(sub).labels_
+        groups = [seg[labels == k] for k in np.unique(labels[labels >= 0])]
+        if len(groups) > 1:
+            stack += groups
+        elif len(groups) == 1 and len(groups[0]) > max_picks:
+            g = groups[0]
+            u = focused_origin_time(data[g], locs[g], phase_type[g], vel, bw)
+            g, us = g[np.argsort(u)], np.sort(u)
+            m = len(us) // 10  # never cut off a sliver
+            mid = (us[m : len(us) - m - 1] + us[m + 1 : len(us) - m]) / 2
+            density = np.searchsorted(us, mid + bw) - np.searchsorted(us, mid - bw)
+            k = m + 1 + np.lexsort((-np.diff(us)[m : len(us) - m - 1], density))[0]
+            stack += [g[:k], g[k:]]
+        elif len(groups) == 1:
+            segments.append(groups[0])
+    return segments
+
+
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
-    retired = {"max_sigma11": "max_residual_time", "max_sigma22": "max_residual_amplitude", "max_sigma12": None}
+    retired = {"max_sigma11": "max_residual_time", "max_sigma22": "max_residual_amplitude", "max_sigma12": None,
+               "use_dbscan": "segment"}
     for old, new in retired.items():  # fail loudly: a silently ignored limit would change the catalogue unseen
         if old in config:
             raise ValueError(f"config['{old}'] is retired; " + (f"use config['{new}']" if new else "remove it"))
@@ -169,7 +252,18 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     else:
         config["eikonal"] = initialize_eikonal(config["eikonal"])
 
-    if ("use_dbscan" in config) and config["use_dbscan"]:
+    # cut the picks into segments for the mixture. "link" (default): groups of picks one event could produce, at most
+    # segment_max_picks each; "dbscan": the hierarchical DBSCAN cut; None: all picks in one segment
+    segment = config.get("segment", "link")
+    if segment not in ("link", "dbscan", None):
+        raise ValueError(f"config['segment'] = {segment!r}; use 'link', 'dbscan' or None")
+    if segment == "link":
+        segments = segment_picks(data, locs, phase_type, vel, max_picks=config.get("segment_max_picks", 200))
+        labels = np.full(len(data), -1)
+        for k, seg in enumerate(sorted(segments, key=lambda i: data[i, 0].min())):  # numbered in time order
+            labels[seg] = k
+        unique_labels = set(labels).difference([-1])
+    elif segment == "dbscan":
         # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
         #     np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])]),
         #     sample_weight=np.squeeze(phase_weight),

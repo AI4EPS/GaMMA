@@ -37,7 +37,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   "ylim": y_range, 
   "zlim": z_range}
   ```
-  - **use_dbscan**: If using dbscan to cut a long sequence of picks into segments. Using DBSCAN can significantly speed up associaiton using small windows.
+  - **segment** (default = "link"): how to cut a long sequence of picks into segments, which speeds up association a lot. "link": groups of picks that one event could produce (stations within 100 km whose time differences fit the distance between them), each at most **segment_max_picks** (default = 200) picks, split further in time. "dbscan": the hierarchical DBSCAN cut below, the default before 1.7.0. None: all picks in one segment. It replaces `use_dbscan` (True → "dbscan" for the old behaviour, False → None).
   - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as a neighbor of the other. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
   - **dbscan_min_samples** (default = 3): The number of samples in a neighborhood for a point to be considered as a core point. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
   - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
