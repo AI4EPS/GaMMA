@@ -41,7 +41,7 @@ def estimate_eps(stations, vp, sigma=2.0):
     return (np.mean(dist) + sigma * np.std(dist)) / vp * 1.5
 
 
-def convert_picks_csv(picks, stations, config):
+def convert_picks_csv(picks, stations, config, columns=("longitude", "latitude", "z_km")):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
     if type(picks["phase_time"].iloc[0]) is str:
         # replace the column: writing datetimes into a string column in place fails on pandas >= 3
@@ -60,7 +60,7 @@ def convert_picks_csv(picks, stations, config):
     else:
         data = t[:, np.newaxis]
     meta = stations.merge(picks["station_id"], how="right", on="station_id", validate="one_to_many")
-    locs = meta[config["dims"]].to_numpy()
+    locs = meta[list(columns)].to_numpy(dtype=float)
     phase_type = picks["phase_type"].apply(lambda x: x.lower()).to_numpy()
     phase_weight = picks["phase_score"].to_numpy()[:, np.newaxis]
     pick_station_id = picks.apply(lambda x: x.station_id + "_" + x.phase_type, axis=1).to_numpy()
@@ -87,11 +87,12 @@ def hierarchical_dbscan_clustering(
     min_cluster_size=500,
     max_time_space_ratio=10,
 ):
-    """DBSCAN in (time, x / vp, y / vp), weighted by phase_weight. A cluster of at least min_cluster_size picks that
-    lasts longer than max_time_space_ratio times its crossing time is clustered again, eps shrunk by 1.2 per round.
-    A re-clustering is kept only if it splits the cluster, and new labels never reuse an old one.
+    """DBSCAN in (time, station position / vp), weighted by phase_weight. phase_loc: each pick's station in km, every
+    column used: projected (x, y), or Earth-centred (x, y, z) for global data. A cluster of at least min_cluster_size
+    picks that lasts longer than max_time_space_ratio times its crossing time is clustered again, eps shrunk by 1.2 per
+    round. A re-clustering is kept only if it splits the cluster, and new labels never reuse an old one.
     Returns one label per pick, -1 for noise."""
-    X = np.hstack([data[:, :1], phase_loc[:, :2] / vel["p"]])  # time, x, y (s)
+    X = np.hstack([data[:, :1], phase_loc / vel["p"]])  # time, position (s)
     w = np.squeeze(phase_weight, axis=-1)
 
     def cluster(idx, e):
@@ -104,7 +105,7 @@ def hierarchical_dbscan_clustering(
             idx = np.flatnonzero(labels == label)
             if len(idx) < min_cluster_size:
                 continue
-            t, xy = X[idx, 0], phase_loc[idx, :2]
+            t, xy = X[idx, 0], phase_loc[idx]
             if t.max() - t.min() < np.linalg.norm(xy.max(axis=0) - xy.min(axis=0)) / vel["p"] * max_time_space_ratio:
                 continue
             pending = True
@@ -126,11 +127,12 @@ def geocentric(lonlat):
 
 
 def local_projection(locs):
-    """Azimuthal equidistant projection (WGS84, as in ADLoc) centred on the stations of locs = (longitude, latitude, z).
+    """Azimuthal equidistant projection centred on the mean of the stations of locs = (longitude, latitude, z), as ADLoc
+    builds each event's frame. Longitude is averaged on the circle, so stations across +-180 deg stay together.
     Returns locs with longitude, latitude replaced by x, y in km, and the projection to map events back."""
-    c = geocentric(np.unique(locs[:, :2], axis=0)).mean(0)
-    lon0, lat0 = np.degrees(np.arctan2(c[1], c[0])), np.degrees(np.arctan2(c[2], np.hypot(c[0], c[1])))
-    proj = Proj(f"+proj=aeqd +lon_0={lon0} +lat_0={lat0} +units=km +ellps=WGS84")
+    lon, lat = np.radians(np.unique(locs[:, :2], axis=0)).T
+    lon0, lat0 = np.degrees(np.arctan2(np.sin(lon).mean(), np.cos(lon).mean())), np.degrees(lat.mean())
+    proj = Proj(f"+proj=aeqd +lon_0={lon0} +lat_0={lat0} +units=km")
     x, y = proj(locs[:, 0], locs[:, 1])
     return np.column_stack([x, y, locs[:, 2:]]), proj
 
@@ -246,14 +248,19 @@ def translate_old_config(config):
     if "use_dbscan" in config:
         config.setdefault("segment", "dbscan" if config.pop("use_dbscan") else None)
         done.append(f"config['use_dbscan'] -> config['segment'] = {config['segment']!r} ('link', 'dbscan' or None)")
-    if any("(km)" in d for d in config.get("dims", [])):
-        done.append(f"config['dims'] {config['dims']}: use 'x_km', 'y_km', 'z_km'; events keep the names given in dims")
+    if "dims" in config:
+        if config["dims"][:2] == ["longitude", "latitude"]:
+            config.pop("dims")  # the stations' longitude, latitude: the global mode, now the default without proj
+            done.append("config['dims'] is no longer needed: without config['proj'], each segment has its own frame")
+        else:
+            done.append(f"config['dims'] {config['dims']} is deprecated: set config['proj'] (a pyproj Proj) and GaMMA "
+                        "projects the stations' longitude, latitude itself; events then carry longitude, latitude too")
     if done:
         msg = "GaMMA uses ADLoc's names since 1.8; old settings translated:\n  " + "\n  ".join(done)
         warnings.warn(msg, stacklevel=3)
 
 
-def translate_old_columns(picks, stations, dims):
+def translate_old_columns(picks, stations, dims=None):
     """Rename columns from before 1.8 to ADLoc's names on copies, with a visible warning."""
     old = {"id": "station_id", "timestamp": "phase_time", "type": "phase_type", "prob": "phase_score",
            "amp": "phase_amplitude"}
@@ -263,7 +270,9 @@ def translate_old_columns(picks, stations, dims):
         warnings.warn(f"picks columns {list(found)} are renamed {list(found.values())} (as ADLoc)", stacklevel=3)
     alias = {"x_km": "x(km)", "y_km": "y(km)", "z_km": "z(km)", "x(km)": "x_km", "y(km)": "y_km", "z(km)": "z_km"}
     found = {"id": "station_id"} if ("id" in stations and "station_id" not in stations) else {}
-    found.update({alias[d]: d for d in dims if d not in stations and alias.get(d) in stations})
+    found.update({alias[d]: d for d in (dims or []) if d not in stations and alias.get(d) in stations})
+    if "z_km" not in stations and "z(km)" in stations and "z_km" not in found.values():
+        found["z(km)"] = "z_km"
     if found:
         stations = stations.rename(columns=found)
         warnings.warn(f"stations columns {list(found)} are renamed {list(found.values())}", stacklevel=3)
@@ -271,12 +280,25 @@ def translate_old_columns(picks, stations, dims):
 
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
+    # work on copies: the caller's config and picks stay as they were (GaMMA adds its tables, bounds and defaults)
+    config = {**config, **{k: {**config[k]} for k in ("vel", "eikonal") if isinstance(config.get(k), dict)}}
+    if isinstance(config.get("eikonal"), dict) and isinstance(config["eikonal"].get("vel"), dict):
+        config["eikonal"]["vel"] = {**config["eikonal"]["vel"]}
+    picks = picks.copy()
     translate_old_config(config)
-    picks, stations = translate_old_columns(picks, stations, config["dims"])
+    picks, stations = translate_old_columns(picks, stations, config.get("dims"))
 
+    # the frame, as in ADLoc. config["proj"] (a pyproj Proj): one projection for every station (local).
+    # Without it, each segment is projected around its own stations (global), as ADLoc does per event.
+    # Deprecated: config["dims"] with the stations' own projected columns, as before 1.13 (local, events in those names)
+    legacy = config.get("proj") is None and "dims" in config
+    geo = config.get("proj") is None and not legacy
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
-        picks, stations, config
+        picks, stations, config, columns=config["dims"] if legacy else ("longitude", "latitude", "z_km")
     )
+    if config.get("proj") is not None:
+        x, y = config["proj"](locs[:, 0], locs[:, 1])
+        locs = np.column_stack([x, y, locs[:, 2]])
 
     if len(data) < config["min_picks"]:
         return [], []
@@ -284,16 +306,13 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     v = config.get("vel", {"P": 6.0, "S": 6.0 / 1.73})
     vel = {"p": v["P"], "s": v["S"]}  # internally phases are lowercase
 
-    # dims (longitude, latitude, z_km): each segment is projected around its own stations, as ADLoc does per event,
-    # so one run can cover any area, up to the whole globe
-    geo = config["dims"][:2] == ["longitude", "latitude"]
-    # cut the picks into segments for the mixture. "dbscan" (default): the hierarchical DBSCAN cut; "link" (default for
-    # geographic dims): groups of picks one event could produce, at most segment_max_picks each; None: one segment
-    segment = config.get("segment", "link" if geo else "dbscan")
+    # cut the picks into segments for the mixture. "dbscan" (default): the hierarchical DBSCAN cut; "link": groups of
+    # picks one event could produce, at most segment_max_picks each; None: one segment
+    segment = config.get("segment", "dbscan")
     if segment not in ("link", "dbscan", None):
         raise ValueError(f"config['segment'] = {segment!r}; use 'link', 'dbscan' or None")
-    if geo and (segment != "link" or len(config["dims"]) != 3):
-        raise ValueError("dims (longitude, latitude, z_km) need segment 'link', which keeps each segment local")
+    if geo and segment is None:
+        raise ValueError("without config['proj'], segment must be 'dbscan' or 'link', which keep each segment local")
     if segment == "link":
         segments = segment_picks(data, locs, phase_type, vel, max_picks=config.get("segment_max_picks", 200), geo=geo)
         labels = np.full(len(data), -1)
@@ -301,11 +320,14 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             labels[seg] = k
         unique_labels = set(labels).difference([-1])
     elif segment == "dbscan":
+        # stations in km: projected x, y, or Earth-centred x, y, z without a projection (distances on the globe)
+        pos = geocentric(locs[:, :2]) if geo else locs[:, :2]
         # eps (s) from the spacing of the stations with picks, unless given
-        eps = config["dbscan_eps"] if "dbscan_eps" in config else estimate_eps(np.unique(locs, axis=0), vel["p"])
+        sta = geocentric(np.unique(locs[:, :2], axis=0)) if geo else np.unique(locs, axis=0)
+        eps = config["dbscan_eps"] if "dbscan_eps" in config else estimate_eps(sta, vel["p"])
         labels = hierarchical_dbscan_clustering(
             data,
-            locs,
+            pos,
             phase_type,
             phase_weight,
             vel,
@@ -319,21 +341,31 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         labels = np.zeros(len(data))
         unique_labels = [0]
 
-    # where events can be: the region xlim_km, ylim_km, zlim_km (bfgs_bounds, when given, overrides it)
+    # where events can be, as in ADLoc: bfgs_bounds when given, else the region xlim_km, ylim_km, zlim_km
     if not geo and "bfgs_bounds" not in config:
-        region = [config["xlim_km"], config["ylim_km"], config["zlim_km"]][: len(config["dims"])]
-        config["bfgs_bounds"] = (*[tuple(b) for b in region], (None, None))
+        region = (tuple(config["xlim_km"]), tuple(config["ylim_km"]), tuple(config["zlim_km"]))
+        config["bfgs_bounds"] = (*region, (None, None))
 
-    # one task per segment: its picks in km, and for geographic dims its own location bounds (its stations +- 300 km)
-    # and the projection that takes its events back to degrees
+    # one task per segment: its picks in km, and without a projection its own bounds and the projection that takes its
+    # events back to degrees. Those bounds, in the segment's frame (centred on its stations): bfgs_bounds when given,
+    # else xlim_km, ylim_km (or the stations' box widened by 300 km) and zlim_km, its top no higher than the segment's
+    # highest station, so one high station elsewhere on the globe does not lift every event
     tasks, projs = [], {}
     for k in unique_labels:
         idx = labels == k
         xyz, bounds = locs[idx], None
         if geo:
             xyz, projs[k] = local_projection(xyz)
-            lo, hi = xyz[:, :2].min(0) - 300.0, xyz[:, :2].max(0) + 300.0
-            bounds = ((lo[0], hi[0]), (lo[1], hi[1]), tuple(config["zlim_km"]), (None, None))
+            if "bfgs_bounds" in config:
+                bounds = tuple(config["bfgs_bounds"])
+            else:
+                if "xlim_km" in config and "ylim_km" in config:  # the region's size, around the segment's stations
+                    xlim, ylim = tuple(config["xlim_km"]), tuple(config["ylim_km"])
+                else:  # the stations' box, widened by 300 km
+                    lo, hi = xyz[:, :2].min(axis=0) - 300.0, xyz[:, :2].max(axis=0) + 300.0
+                    xlim, ylim = (lo[0], hi[0]), (lo[1], hi[1])
+                z0, z1 = config["zlim_km"]
+                bounds = (xlim, ylim, (max(z0, xyz[:, 2].min()), z1), (None, None))
         tasks.append(
             (k, data[idx], xyz, phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx], bounds)
         )
@@ -341,25 +373,41 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     if ("eikonal" not in config) or (config["eikonal"] is None):
         config["eikonal"] = None
     else:
-        # one table per station depth (station z_km, absolute, positive down), as in ADLoc; as deep as the events
-        # unless eikonal zlim_km is set (e.g. (0, 60), below the Moho, so far first arrivals are modelled)
-        eik = {"zlim_km": config["zlim_km"], **config["eikonal"], "station_z_km": locs[:, 2]}
-        (ez0, ez1), (z0, z1) = eik["zlim_km"], config["zlim_km"]
-        if ez0 > z0 or ez1 < z1:  # the tables must cover every depth an event can take
-            eik["zlim_km"] = (min(ez0, z0), max(ez1, z1))
-            warnings.warn(
-                f"config['eikonal']['zlim_km'] = {(ez0, ez1)} does not cover the events' config['zlim_km'] = "
-                f"{(z0, z1)}; the tables use {eik['zlim_km']}",
-                stacklevel=2,
-            )
-        if geo:  # the tables only have to reach across the largest segment's bounds
-            eik["rmax_km"] = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for *_, b in tasks], default=1.0)
-        elif "xlim_km" not in eik:  # across the farthest event-station pair: the region and the stations together
+        # how far the tables must reach: across the largest segment's bounds, or the region and the stations together
+        if geo:
+            rmax = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for *_, b in tasks], default=1.0)
+        else:
             (x0, x1), (y0, y1) = config["bfgs_bounds"][:2]
             dx = max(x1, locs[:, 0].max()) - min(x0, locs[:, 0].min())
             dy = max(y1, locs[:, 1].max()) - min(y0, locs[:, 1].min())
-            eik["rmax_km"] = np.hypot(dx, dy)
-        config["eikonal"] = initialize_eikonal(eik)
+            rmax = np.hypot(dx, dy)
+        if "tt" in config["eikonal"]:
+            # tables already built (by GaMMA or ADLoc's init_eikonal2d, the same format): used as they are
+            eik = config["eikonal"]
+            (z0, z1), r1 = config["zlim_km"], eik["rgrid"][-1]
+            if eik["zgrid"][0] > z0 or eik["zgrid"][-1] < z1 or r1 < rmax:
+                warnings.warn(
+                    f"the given travel-time tables (z {eik['zgrid'][0]:.1f} to {eik['zgrid'][-1]:.1f} km, r to "
+                    f"{r1:.0f} km) do not cover zlim_km = {tuple(config['zlim_km'])} and {rmax:.0f} km; beyond them "
+                    "times are extrapolated",
+                    stacklevel=2,
+                )
+        else:
+            # one table per station depth (station z_km, absolute, positive down), as in ADLoc; as deep as the events
+            # unless eikonal zlim_km is set (e.g. (0, 60), below the Moho, so far first arrivals are modelled)
+            eik = {"zlim_km": config["zlim_km"], **config["eikonal"], "station_z_km": locs[:, 2]}
+            (ez0, ez1), (z0, z1) = eik["zlim_km"], config["zlim_km"]
+            if ez0 > z0 or ez1 < z1:  # the tables must cover every depth an event can take
+                eik["zlim_km"] = (min(ez0, z0), max(ez1, z1))
+                warnings.warn(
+                    f"config['eikonal']['zlim_km'] = {(ez0, ez1)} does not cover the events' config['zlim_km'] = "
+                    f"{(z0, z1)}; the tables use {eik['zlim_km']}",
+                    stacklevel=2,
+                )
+            if geo or "xlim_km" not in eik:
+                eik["rmax_km"] = rmax
+            eik = initialize_eikonal(eik)
+        config["eikonal"] = eik
 
     if "ncpu" not in config:
         config["ncpu"] = max(1, min(len(unique_labels) // 4, min(32, mp.cpu_count() - 1)))
@@ -391,12 +439,12 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         # the initializer. The eikonal tables (MBs) go through a memory-mapped file instead: in the initializer's
         # arguments they would block the parent until each worker had booted, one worker after another.
         with tempfile.TemporaryDirectory() as tmp:
-            shared_config, tables = config, None
+            shared_config, tables = {**config, "proj": None}, None  # workers see km only; the projection stays here
             if config["eikonal"] is not None:
                 tables = os.path.join(tmp, "eikonal_tt.npy")
                 np.save(tables, config["eikonal"]["tt"])
                 eikonal = {k: v for k, v in config["eikonal"].items() if k != "tt"}
-                shared_config = {**config, "eikonal": eikonal}
+                shared_config = {**shared_config, "eikonal": eikonal}
             shared = (shared_config, timestamp0, vel, method, tables)
             assert len(pickle.dumps(shared)) < 2**16, "spawn blocks on initializer data above the 64 KB pipe buffer"
             with _one_thread_env():
@@ -412,15 +460,18 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 )
                 results = dict(zip(unique_labels, progress))
 
-    # number events in cluster order from event_idx0, not in the order clusters finish; coordinates back to the names
-    # in dims, and to degrees for geographic dims
-    names = dict(zip(["x_km", "y_km", "z_km"], config["dims"]))
+    # number events in cluster order from event_idx0, not in the order clusters finish. Every event gets longitude and
+    # latitude; with config["proj"] it keeps x_km, y_km in that frame, without one those are dropped (each segment had
+    # its own frame); the deprecated dims keep their names
+    names = dict(zip(["x_km", "y_km", "z_km"], config["dims"])) if legacy else {}
     events, assignment, event_idx = [], [], event_idx0
     for k in sorted(results):
         each_events, each_assignment = results[k]
         for event in each_events:
             if k in projs:
-                event["x_km"], event["y_km"] = projs[k](event["x_km"], event["y_km"], inverse=True)
+                event["longitude"], event["latitude"] = projs[k](event.pop("x_km"), event.pop("y_km"), inverse=True)
+            elif config.get("proj") is not None:
+                event["longitude"], event["latitude"] = config["proj"](event["x_km"], event["y_km"], inverse=True)
             event["event_index"] += event_idx
             events.append({names.get(key, key): value for key, value in event.items()})
         assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
@@ -572,7 +623,7 @@ def associate(
     #  score_sample = gmm.score_samples(data_)
 
     ## post-filter: refit each event on its picks, drop the picks off the fit, keep the events with enough picks left
-    D = len(config["dims"])
+    D = locs_.shape[1]  # 3 (x, y, z); fewer only with the deprecated dims
     events, assignment = [], []
     for i in range(max_num_event):
         idx = np.flatnonzero(pred == i)
@@ -604,7 +655,7 @@ def associate(
             "num_p_picks": int(np.sum(ph == "p")),
             "num_s_picks": int(np.sum(ph == "s")),
             "event_index": event_idx,
-            **dict(zip(["x_km", "y_km", "z_km"], center[:D])),  # renamed to the names in dims by association()
+            **dict(zip(["x_km", "y_km", "z_km"], center[:D])),  # to longitude, latitude by association()
             **({"depth_km": center[2]} if D == 3 else {}),  # as ADLoc
         }
         events.append(event)
