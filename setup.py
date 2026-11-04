@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="GMMA",
-    version="1.8.0",
+    version="1.9.0",
     long_description="*GaMMA*: *Ga*ussian *M*ixture *M*odel *A*ssociation",
     long_description_content_type="text/markdown",
     packages=["gamma"],
