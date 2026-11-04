@@ -1,5 +1,7 @@
 import multiprocessing as mp
+from contextlib import contextmanager
 import os
+import pickle
 import platform
 import random
 import tempfile
@@ -14,6 +16,7 @@ from scipy.sparse import coo_matrix
 from scipy.spatial import cKDTree
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import sort_graph_by_row_values
+from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from ._bayesian_mixture import BayesianGaussianMixture
@@ -443,7 +446,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 eikonal = {k: v for k, v in config["eikonal"].items() if k != "tt"}
                 shared_config = {**config, "eikonal": eikonal}
             shared = (shared_config, timestamp0, vel, method, tables)
-            with mp.get_context(context).Pool(config["ncpu"], initializer=_init_worker, initargs=(shared,)) as p:
+            assert len(pickle.dumps(shared)) < 2**16, "spawn blocks on initializer data above the 64 KB pipe buffer"
+            with _one_thread_env():
+                p = mp.get_context(context).Pool(config["ncpu"], initializer=_init_pool_worker, initargs=(shared,))
+            with p:
                 args = [by_label[k] for k in unique_labels]
                 # imap (in order, like starmap) so a progress bar can follow the clusters as they finish
                 progress = tqdm(
@@ -472,7 +478,29 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     return events, assignment  # , event_idx.value
 
 
+@contextmanager
+def _one_thread_env():
+    """One thread per math library (BLAS, OpenMP) in workers spawned inside: they read these at import, before
+    threadpool_limits could reach them. The workers are the parallelism; threads inside them only contend."""
+    keys = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+    saved = {k: os.environ.get(k) for k in keys}
+    os.environ.update(dict.fromkeys(keys, "1"))
+    try:
+        yield
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 _SHARED = None  # (config, timestamp0, vel, method), set once per worker
+
+
+def _init_pool_worker(shared):
+    threadpool_limits(1)  # as _one_thread_env, for libraries already loaded (fork)
+    _init_worker(shared)
 
 
 def _init_worker(shared):
