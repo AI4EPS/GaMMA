@@ -95,24 +95,63 @@ def eikonal_solve(u, f, h):
 
 ###################################### Traveltime based on Eikonal Timetable ######################################
 @njit
-def _bilinear(tt, iph, itab, r, z, r0, z0, h):
-    """Time and its exact derivatives (dt/dr, dt/dz) of the bilinear interpolant of tables tt (phase, table, nr, nz),
-    so the optimizer sees a consistent pair (as in ADLoc). Beyond the grid the edge cell's bilinear form continues, so
-    the gradient never vanishes there."""
+def _node(tt, p, m, a, b, nr, nz):
+    """Table value at node (a, b), one node beyond the grid at most: mirrored at r = 0 (T is even in r), linear
+    continuation beyond the other edges."""
+    a = abs(a)
+    if a > nr - 1:
+        return 2.0 * _node(tt, p, m, nr - 1, b, nr, nz) - _node(tt, p, m, nr - 2, b, nr, nz)
+    if b < 0:
+        return 2.0 * tt[p, m, a, 0] - tt[p, m, a, 1]
+    if b > nz - 1:
+        return 2.0 * tt[p, m, a, nz - 1] - tt[p, m, a, nz - 2]
+    return tt[p, m, a, b]
+
+
+@njit
+def _catmull_rom(f):
+    """Weights of nodes -1, 0, 1, 2 at fraction f in [0, 1], and their derivatives in f."""
+    f2, f3 = f * f, f * f * f
+    w = ((-f3 + 2 * f2 - f) / 2, (3 * f3 - 5 * f2 + 2) / 2, (-3 * f3 + 4 * f2 + f) / 2, (f3 - f2) / 2)
+    d = ((-3 * f2 + 4 * f - 1) / 2, (9 * f2 - 10 * f) / 2, (-9 * f2 + 8 * f + 1) / 2, (3 * f2 - 2 * f) / 2)
+    return w, d
+
+
+@njit
+def _bicubic(tt, iph, itab, r, z, z0, h):
+    """Time and its exact derivatives (dt/dr, dt/dz) of the bicubic (Catmull-Rom) interpolant of tables tt (phase,
+    table, nr, nz) on r = 0, h, ...: a consistent pair, smooth across the nodes (a bilinear time has a kink at every
+    node, where L-BFGS stops), as in ADLoc. Beyond the grid the time continues linearly from the nearest grid point, with
+    its exact, never-zero gradient."""
     n = r.shape[0]
     nr, nz = tt.shape[2], tt.shape[3]
     t, tr, tz = np.empty(n), np.empty(n), np.empty(n)
     for k in range(n):
         p, m = iph[k], itab[k]
-        x, y = (r[k] - r0) / h, (z[k] - z0) / h
-        i = min(max(int(np.floor(x)), 0), nr - 2)
-        j = min(max(int(np.floor(y)), 0), nz - 2)
-        fx, fy = x - i, y - j
-        t00, t10, t01, t11 = tt[p, m, i, j], tt[p, m, i + 1, j], tt[p, m, i, j + 1], tt[p, m, i + 1, j + 1]
-        c = t11 - t10 - t01 + t00
-        t[k] = t00 + (t10 - t00) * fx + (t01 - t00) * fy + c * fx * fy
-        tr[k] = ((t10 - t00) + c * fy) / h
-        tz[k] = ((t01 - t00) + c * fx) / h
+        x, y = r[k] / h, (z[k] - z0) / h  # event in grid units (x = r / h, y = z from the top)
+        xc, yc = min(x, nr - 1.0), min(max(y, 0.0), nz - 1.0)  # c: the nearest grid point (c = q inside the grid)
+        i, j = min(int(xc), nr - 2), min(int(yc), nz - 2)
+        wx, dwx = _catmull_rom(xc - i)
+        wy, dwy = _catmull_rom(yc - j)
+        tq, tx, ty, txy = 0.0, 0.0, 0.0, 0.0  # T, dT/dx, dT/dy, d2T/dxdy at c, in grid units
+        for a in range(4):
+            for b in range(4):
+                v = _node(tt, p, m, i - 1 + a, j - 1 + b, nr, nz)
+                tq += wx[a] * wy[b] * v
+                tx += dwx[a] * wy[b] * v
+                ty += wx[a] * dwy[b] * v
+                txy += dwx[a] * dwy[b] * v
+        # Outside the grid the time continues linearly from c with the slope at c:
+        #     T(q) = T(c) + T_x(c) (x - xc) + T_y(c) (y - yc)
+        # (inside, x = xc and y = yc: the bicubic time). Its gradient by the chain rule: c follows the event along an
+        # axis where the event is inside the grid (xc = x) and stays fixed along an axis where it is outside, so
+        #     dT/dx = T_x(c) + T_xy(c) (y - yc)   x inside (e.g. the event above the top: c slides along the top edge)
+        #     dT/dx = T_x(c)                      x beyond rmax (c fixed in x)
+        # and likewise for y. Time and gradient are continuous across the edge, and the gradient is the edge's, never
+        # zero, so an event pushed outside is pulled back toward the data.
+        t[k] = tq + tx * (x - xc) + ty * (y - yc)
+        tr[k] = (tx + (txy * (y - yc) if x == xc else 0.0)) / h
+        tz[k] = (ty + (txy * (x - xc) if y == yc else 0.0)) / h
     return t, tr, tz
 
 
@@ -133,7 +172,7 @@ def traveltime_grad(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 
         raise ValueError("a station depth has no eikonal table: pass every station's depth in station_z_km")
     r = np.hypot(d[:, 0], d[:, 1])
     z = np.ascontiguousarray(np.broadcast_to(event_loc[..., 2], (n,)), dtype=float)
-    t, tr, tz = _bilinear(eikonal["tt"], is_s.astype(np.int64), itab, r, z, 0.0, eikonal["zgrid"][0], eikonal["h"])
+    t, tr, tz = _bicubic(eikonal["tt"], is_s.astype(np.int64), itab, r, z, eikonal["zgrid"][0], eikonal["h"])
     rr = np.where(r > 1e-9, r, 1.0)  # the horizontal direction d / r, and 0 on the station's axis, as in ADLoc
     cx, cy = np.where(r > 1e-9, d[:, 0] / rr, 0.0), np.where(r > 1e-9, d[:, 1] / rr, 0.0)
     return t, np.column_stack([tr * cx, tr * cy, tz])
