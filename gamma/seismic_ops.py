@@ -355,8 +355,7 @@ def initialize_eikonal(config):
     depth, so every station sees the same layers, and its top velocity extends upward to the highest station.
 
     config: vel {"Z", "P", "S"} (km, km/s), h (km), xlim_km and ylim_km (the region) or rmax_km (the largest distance),
-    zlim_km (event depths), and station_z_km (the station depths). Adds the tables and the grid to config and returns
-    it."""
+    zlim_km (event depths), and station_z_km (the station depths). Returns the tables and their grid."""
     h = config["h"]
     z_sta = np.unique(np.round(np.asarray(config["station_z_km"], dtype=float) / DZ_STA)) * DZ_STA
     if "rmax_km" in config:  # the largest event-station distance needed
@@ -375,20 +374,10 @@ def initialize_eikonal(config):
             list(pool.map(lambda z: station_table(zz, np.asarray(config["vel"][ph], float), z, rgrid, zgrid, h), z_sta))
             for ph in ("P", "S")
         ]
-    config.update(
-        {
-            "tt": np.array(tt, dtype=np.float32),  # (phase, table, nr, nz), read by traveltime_grad
-            "station_z": z_sta,
-            "rgrid": rgrid,
-            "zgrid": zgrid,
-            "nr": len(rgrid),
-            "nz": len(zgrid),
-            "h": h,
-        }
-    )
     print(f"Eikonal: {len(z_sta)} station tables of {len(rgrid)} x {len(zgrid)} nodes in {time.time() - t0:.1f} s")
-
-    return config
+    # only the tables and their grid, not the inputs: this dict goes to every worker
+    tt = np.array(tt, dtype=np.float32)  # (phase, table, nr, nz), read by traveltime_grad
+    return {"tt": tt, "station_z": z_sta, "rgrid": rgrid, "zgrid": zgrid, "nr": len(rgrid), "nz": len(zgrid), "h": h}
 
 
 def initialize_centers(
