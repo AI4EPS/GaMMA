@@ -331,8 +331,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     # dims (longitude, latitude, z_km): each segment is projected around its own stations, as ADLoc does per event,
     # so one run can cover any area, up to the whole globe
     geo = config["dims"][:2] == ["longitude", "latitude"]
-    if geo and (segment == "dbscan" or len(config["dims"]) != 3):
-        raise ValueError("dims (longitude, latitude, z_km) work with segment 'link' or None")
+    if geo and (segment != "link" or len(config["dims"]) != 3):
+        raise ValueError("dims (longitude, latitude, z_km) need segment 'link', which keeps each segment local")
     if segment == "link":
         segments = segment_picks(data, locs, phase_type, vel, max_picks=config.get("segment_max_picks", 200), geo=geo)
         labels = np.full(len(data), -1)
@@ -364,22 +364,27 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         labels = np.zeros(len(data))
         unique_labels = [0]
 
-    projs, bounds = {}, {}
-    if geo:  # each segment's picks in km on its own projection; its events stay within its stations +- 300 km
-        locs = locs.copy()
-        z_bounds = (config["zlim_km"][0], config["zlim_km"][1] + 1)
-        for k in unique_labels:
-            idx = labels == k
-            locs[idx], projs[k] = local_projection(locs[idx])
-            lo, hi = locs[idx, :2].min(0) - 300.0, locs[idx, :2].max(0) + 300.0
-            bounds[k] = ((lo[0], hi[0]), (lo[1], hi[1]), z_bounds, (None, None))
+    # one task per segment: its picks in km, and for geographic dims its own location bounds (its stations +- 300 km)
+    # and the projection that takes its events back to degrees
+    tasks, projs = [], {}
+    for k in unique_labels:
+        idx = labels == k
+        xyz, bounds = locs[idx], None
+        if geo:
+            xyz, projs[k] = local_projection(xyz)
+            lo, hi = xyz[:, :2].min(0) - 300.0, xyz[:, :2].max(0) + 300.0
+            z0, z1 = config["zlim_km"]
+            bounds = ((lo[0], hi[0]), (lo[1], hi[1]), (z0, z1 + 1), (None, None))
+        tasks.append(
+            (k, data[idx], xyz, phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx], bounds)
+        )
 
     if ("eikonal" not in config) or (config["eikonal"] is None):
         config["eikonal"] = None
     else:
         if geo:  # the travel-time table only has to reach across the largest segment's bounds
-            rmax = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for b in bounds.values()], default=1.0)
-            config["eikonal"] = {**config["eikonal"], "xlim_km": (0.0, rmax), "ylim_km": (0.0, 0.0)}
+            rmax = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for *_, b in tasks], default=1.0)
+            config["eikonal"] = {**config["eikonal"], "rmax_km": rmax}
         config["eikonal"] = initialize_eikonal(config["eikonal"])
 
     if "ncpu" not in config:
@@ -388,35 +393,15 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         config["ncpu"] = min(mp.cpu_count(), config["ncpu"])
 
     if config["ncpu"] == 1:
-        # event_idx0 - 1 as event_idx is increased before use, as in the parallel path
-        event_idx = event_idx0 - 1
-        events, assignment = [], []
-        for unique_label in tqdm(sorted(unique_labels), desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster"):
-            events_, assignment_ = associate(
-                unique_label,
-                labels,
-                data,
-                locs,
-                phase_type,
-                phase_weight,
-                pick_idx,
-                pick_station_id,
-                {**config, "bfgs_bounds": bounds[unique_label]} if geo else config,
-                timestamp0,
-                vel,
-                method,
-                event_idx,
-            )
-            if geo:
-                to_lonlat(events_, projs[unique_label])
-            event_idx += len(events_)
-            events.extend(events_)
-            assignment.extend(assignment_)
+        _init_worker((config, timestamp0, vel, method, None))
+        progress = tqdm(tasks, desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster")
+        results = {task[0]: _associate_cluster(task) for task in progress}
     else:
         # the following sort and shuffle is to make sure jobs are distributed evenly
         counter = Counter(labels)
         unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
         np.random.RandomState(42).shuffle(unique_labels)  # its own generator: the same order every run
+        by_label = {task[0]: task for task in tasks}
 
         # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
         chunk_size = max(len(unique_labels) // (config["ncpu"] * 20), 1)
@@ -440,13 +425,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 shared_config = {**config, "eikonal": eikonal}
             shared = (shared_config, timestamp0, vel, method, tables)
             with mp.get_context(context).Pool(config["ncpu"], initializer=_init_worker, initargs=(shared,)) as p:
-                args = []
-                for k in unique_labels:
-                    idx = labels == k
-                    args.append(
-                        (k, data[idx], locs[idx], phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx],
-                         bounds.get(k))
-                    )
+                args = [by_label[k] for k in unique_labels]
                 # imap (in order, like starmap) so a progress bar can follow the clusters as they finish
                 progress = tqdm(
                     p.imap(_associate_cluster, args, chunksize=chunk_size),
@@ -456,26 +435,22 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 )
                 results = dict(zip(unique_labels, progress))
 
-        # number events in cluster order from event_idx0, as the serial path does, not in the order clusters finish
-        events, assignment, event_idx = [], [], event_idx0
-        for k in sorted(results):
-            each_events, each_assignment = results[k]
-            if geo:
-                to_lonlat(each_events, projs[k])
-            for event in each_events:
-                event["event_index"] += event_idx
-            events.extend(each_events)
-            assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
-            event_idx += len(each_events)
+    # number events in cluster order from event_idx0, not in the order clusters finish; coordinates back to the names
+    # in dims, and to degrees for geographic dims
+    names = dict(zip(["x_km", "y_km", "z_km"], config["dims"]))
+    events, assignment, event_idx = [], [], event_idx0
+    for k in sorted(results):
+        each_events, each_assignment = results[k]
+        for event in each_events:
+            if k in projs:
+                event["x_km"], event["y_km"] = projs[k](event["x_km"], event["y_km"], inverse=True)
+            event["event_index"] += event_idx
+            events.append({names.get(key, key): value for key, value in event.items()})
+        assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
+        event_idx += len(each_events)
 
     print(f"Associated {len(events)} events with {len(assignment)} picks")
     return events, assignment  # , event_idx.value
-
-
-def to_lonlat(events, proj):
-    """Events located in a segment's projected km back to longitude, latitude (geographic dims)."""
-    for event in events:
-        event["longitude"], event["latitude"] = proj(event["longitude"], event["latitude"], inverse=True)
 
 
 _SHARED = None  # (config, timestamp0, vel, method), set once per worker
@@ -630,7 +605,7 @@ def associate(
             "num_p_picks": int(np.sum(ph == "p")),
             "num_s_picks": int(np.sum(ph == "s")),
             "event_index": event_idx,
-            **dict(zip(config["dims"], center[:D])),
+            **dict(zip(["x_km", "y_km", "z_km"], center[:D])),  # renamed to the names in dims by association()
             **({"depth_km": center[2]} if D == 3 else {}),  # as ADLoc
         }
         events.append(event)

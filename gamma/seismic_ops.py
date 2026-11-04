@@ -321,8 +321,11 @@ def calc_mag_batch(amp, event_loc, station_loc, weight, min=-2, max=8):
 def initialize_eikonal(config):
     path = Path("./eikonal")
     path.mkdir(exist_ok=True)
-    xlim, ylim = config["xlim_km"], config["ylim_km"]
-    rlim = [0, np.sqrt((xlim[1] - xlim[0]) ** 2 + (ylim[1] - ylim[0]) ** 2)]
+    if "rmax_km" in config:  # the largest event-station distance needed
+        rlim = [0, config["rmax_km"]]
+    else:  # the region's diagonal
+        xlim, ylim = config["xlim_km"], config["ylim_km"]
+        rlim = [0, np.sqrt((xlim[1] - xlim[0]) ** 2 + (ylim[1] - ylim[0]) ** 2)]
     zlim = config["zlim_km"]
     h = config["h"]
 
