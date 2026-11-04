@@ -3,6 +3,7 @@ import os
 import platform
 import random
 import tempfile
+import warnings
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -232,12 +233,32 @@ def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=
     return segments
 
 
-def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
-    retired = {"max_sigma11": "max_residual_time", "max_sigma22": "max_residual_amplitude", "max_sigma12": None,
-               "use_dbscan": "segment"}
-    for old, new in retired.items():  # fail loudly: a silently ignored limit would change the catalogue unseen
+def translate_old_config(config):
+    """Rename settings from before 1.5 / 1.7 in place, with a visible warning, so old configs keep running.
+    A new key, when also set, wins."""
+    renamed = {"max_sigma11": "max_residual_time", "max_sigma22": "max_residual_amplitude"}
+    for old, new in renamed.items():
         if old in config:
-            raise ValueError(f"config['{old}'] is retired; " + (f"use config['{new}']" if new else "remove it"))
+            config.setdefault(new, config.pop(old))
+            warnings.warn(
+                f"config['{old}'] is renamed config['{new}'] (now {config[new]}); since 1.5 it limits the residual "
+                "after each event is relocated, so old values are looser than before (default 1.0)",
+                stacklevel=3,
+            )
+    if "max_sigma12" in config:
+        config.pop("max_sigma12")
+        warnings.warn("config['max_sigma12'] is ignored: the covariance check was removed in 1.5", stacklevel=3)
+    if "use_dbscan" in config:
+        config.setdefault("segment", "link" if config.pop("use_dbscan") else None)
+        warnings.warn(
+            f"config['use_dbscan'] is replaced by config['segment'] (now {config['segment']!r}): 'link' (default), "
+            "'dbscan' (the cut before 1.7) or None (one segment)",
+            stacklevel=3,
+        )
+
+
+def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
+    translate_old_config(config)
 
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
         picks, stations, config
