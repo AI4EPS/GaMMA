@@ -331,48 +331,18 @@ def associate(
     #     amp_range = max(data_[:, 1].max() - data_[:, 1].min(), 1)
 
     # ## initialization with [1,1,1] horizontal points and N time points
-    centers_init = init_centers(config, data_, locs_, phase_type_, phase_weight_, max_num_event, seed=42 + int(k))
+    centers_init = init_centers(config, data_, locs_, phase_type_, vel, max_num_event)
 
     ## run clustering
-    # mean_precision_prior = 0.01 / time_range
-    if "covariance_prior" in config:
-        covariance_prior_pre = config["covariance_prior"]
-    else:
-        # covariance_prior_pre = [5.0, 2.0]
-        ## TODO: design a smark way to set covariance_prior
-        weight = np.squeeze(phase_weight_)
-        x_mean = np.average(locs_[:, 0], weights=weight)
-        y_mean = np.average(locs_[:, 1], weights=weight)
-        x_std = np.sqrt(np.average((locs_[:, 0] - x_mean) ** 2, weights=weight))
-        y_std = np.sqrt(np.average((locs_[:, 1] - y_mean) ** 2, weights=weight))
-        # x_std = np.std(locs_[:, 0])
-        # y_std = np.std(locs_[:, 1])
-        # t_std = np.std(data_[:, 0])
-        ## option 1
-        # scaler = max(np.sqrt(x_std**2 + y_std**2) / 6.0 , 0.1)
-        ## option 2
-        # scaler = max(np.sqrt(x_std**2 + y_std**2) / 6.0 / t_std, 0.1) * 10
-        ## option 3
-        # d, v = 50, 6.0
-        # scaler = max((np.exp(np.sqrt(x_std**2 + y_std**2)/d) - 1)/(np.exp(1) - 1) * d / v / t_std, 0.2) * 10
-        ## option 4
-        rstd = np.sqrt(x_std**2 + y_std**2)
-        # scaler = max(10.0, (rstd / 6.0) * (rstd / 60.0))  # 6.0 km/s, 60 km
-        # scaler = max(1.0, (rstd / 6.0) * (rstd / 30.0))  # 6.0 km/s, 30 km
-        a, b = 0.5, 15
-        scaler = a + (b ** (rstd / 30) - 1) / (b - 1) * 4.0  # (0, a), (30, 4 + a)
-        # print(f"rstd: {rstd}, scaler: {scaler}, max_num_event: {max_num_event}")
-        if config["use_amplitude"]:
-            # covariance_prior_pre = [time_range * 10.0, amp_range * 10.0]
-            covariance_prior_pre = [scaler, scaler]
-        else:
-            # covariance_prior_pre = [time_range * 10.0]
-            covariance_prior_pre = [scaler]
-    # print(f"covariance_prior_pre: {covariance_prior_pre}")
+    # Wishart prior on each event's residual covariance (sklearn's convention): nu0 pseudo-picks of spread sigma, i.e.
+    # covariance_prior Psi = nu0 * sigma^2, with sigma = (1.5 s, 0.5 log10). The time spread is how wide an event may
+    # be (real pick scatter is ~0.3 s, but a prior that tight splits events); real amplitude scatter is ~0.3.
+    nu0 = config.get("degrees_of_freedom_prior", 5.0)
+    prior = config.get("covariance_prior", nu0 * np.array([1.5, 0.5]) ** 2)  # [time (s^2), amplitude (log10^2)]
     if config["use_amplitude"]:
-        covariance_prior = np.array([[covariance_prior_pre[0], 0.0], [0.0, covariance_prior_pre[1]]])
+        covariance_prior = np.diag(np.asarray(prior[:2], dtype=float))
     else:
-        covariance_prior = np.array([[covariance_prior_pre[0]]])
+        covariance_prior = np.array([[float(prior[0])]])
         data_ = data_[:, 0:1]
 
     random_state = 42
@@ -381,8 +351,8 @@ def associate(
             n_components=max_num_event,
             # weight_concentration_prior_type="dirichlet_process",
             weight_concentration_prior=1.0 / max_num_event,
-            # mean_precision_prior=mean_precision_prior,
             covariance_prior=covariance_prior,
+            degrees_of_freedom_prior=nu0,
             # init_params="random",
             # init_params="k-means++",
             # init_params="kmeans",
@@ -565,10 +535,9 @@ def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_i
 #     return centers_init
 
 
-def init_centers(config, data_, locs_, type_, weight_, max_num_event=1, seed=42):
+def init_centers(config, data_, locs_, type_, vel, max_num_event=1):
     """
     max_num_event: maximum number of events at one station
-    seed: of this cluster's random start; differs between clusters so their starts are not offset alike
     """
 
     # t_init = np.random.choice(data_[:, 0], max_num_event, replace=False)
@@ -579,34 +548,21 @@ def init_centers(config, data_, locs_, type_, weight_, max_num_event=1, seed=42)
     # index = np.argsort(data_[:, 0])[:: max(len(data_) // max_num_event, 1)][:max_num_event]
     # use p first, then s
     index = np.argsort(data_[:, 0])
-    p_index = index[type_ == "p"]
-    s_index = index[type_ == "s"]
+    is_p = type_[index] == "p"  # in time order, like index
+    p_index, s_index = index[is_p], index[~is_p]
     if len(p_index) >= max_num_event:
         index = p_index[:: max(len(p_index) // max_num_event, 1)][:max_num_event]
     else:
         num = max_num_event - len(p_index)
         index = np.concatenate([p_index, s_index[:: max(len(s_index) // num, 1)][:num]])
 
-    weight_ = weight_.squeeze()
-    mu_x = np.average(locs_[:, 0], weights=weight_)
-    sigma_x = np.sqrt(np.average((locs_[:, 0] - mu_x) ** 2, weights=weight_))
-    mu_y = np.average(locs_[:, 1], weights=weight_)
-    sigma_y = np.sqrt(np.average((locs_[:, 1] - mu_y) ** 2, weights=weight_))
-    t_init = (
-        data_[index, 0]
-        # + np.random.uniform(low=-1, high=0, size=max_num_event)
-        # * (np.std(locs_[:, 0]) + np.std(locs_[:, 1]))
-        # / 2.0
-        # / 6.0
-    )
-    # a generator per cluster, so a cluster's start does not depend on the clusters run before it (CPU count, order)
-    rng = np.random.RandomState(seed)
-    x_init = locs_[index, 0] + rng.uniform(low=-1, high=1, size=max_num_event) * sigma_x
-    y_init = locs_[index, 1] + rng.uniform(low=-1, high=1, size=max_num_event) * sigma_y
-    z_init = (
-        np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
-        # + np.random.uniform(low=-1, high=1, size=max_num_event) * (config["z(km)"][1] - config["z(km)"][0]) / 6.0
-    )
+    # each event starts at its seed pick's station at mid depth, with origin time = the seed's arrival minus the travel
+    # time from there (straight ray); the arrival time itself would start every predicted arrival late
+    x_init, y_init = locs_[index, 0], locs_[index, 1]
+    z_init = np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
+    xyz = np.column_stack([x_init, y_init, z_init])[:, : locs_.shape[1]]
+    v = np.where(type_[index] == "p", vel["p"], vel["s"])
+    t_init = data_[index, 0] - np.linalg.norm(xyz - locs_[index], axis=1) / v
 
     if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
         centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
