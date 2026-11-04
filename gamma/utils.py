@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+from pyproj import Proj, Transformer
 from scipy.sparse import coo_matrix
 from scipy.spatial import cKDTree
 from sklearn.cluster import DBSCAN
@@ -27,7 +28,7 @@ def random_seed():
 
 # def estimate_station_spacing(stations):
 def estimate_eps(stations, vp, sigma=2.0):
-    X = stations[["x(km)", "y(km)", "z(km)"]].values
+    X = stations[["x_km", "y_km", "z_km"] if "x_km" in stations else ["x(km)", "y(km)", "z(km)"]].values
     D = np.sqrt(((X[:, np.newaxis, :] - X[np.newaxis, :, :]) ** 2).sum(axis=-1))
 
     D[D == 0] = np.inf
@@ -54,11 +55,11 @@ def estimate_eps(stations, vp, sigma=2.0):
 
 def convert_picks_csv(picks, stations, config):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
-    if type(picks["timestamp"].iloc[0]) is str:
+    if type(picks["phase_time"].iloc[0]) is str:
         # replace the column: writing datetimes into a string column in place fails on pandas >= 3
-        picks["timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
+        picks["phase_time"] = picks["phase_time"].apply(lambda x: datetime.fromisoformat(x))
     t = (
-        picks["timestamp"]
+        picks["phase_time"]
         .apply(lambda x: x.tz_convert("UTC").timestamp() if x.tzinfo is not None else x.tz_localize("UTC").timestamp())
         .to_numpy()
     )
@@ -66,15 +67,15 @@ def convert_picks_csv(picks, stations, config):
     timestamp0 = np.min(t)
     t = t - timestamp0
     if config["use_amplitude"]:
-        a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy()  ##cm/s
+        a = picks["phase_amplitude"].apply(lambda x: np.log10(x * 1e2)).to_numpy()  ##cm/s
         data = np.stack([t, a]).T
     else:
         data = t[:, np.newaxis]
-    meta = stations.merge(picks["id"], how="right", on="id", validate="one_to_many")
+    meta = stations.merge(picks["station_id"], how="right", on="station_id", validate="one_to_many")
     locs = meta[config["dims"]].to_numpy()
-    phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
-    phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
-    pick_station_id = picks.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
+    phase_type = picks["phase_type"].apply(lambda x: x.lower()).to_numpy()
+    phase_weight = picks["phase_score"].to_numpy()[:, np.newaxis]
+    pick_station_id = picks.apply(lambda x: x.station_id + "_" + x.phase_type, axis=1).to_numpy()
     nan_idx = meta.isnull().any(axis=1)
     return (
         data[~nan_idx],
@@ -154,13 +155,33 @@ def hierarchical_dbscan_clustering(
     return labels
 
 
-def link_picks(data, locs, phase_type, vel, max_km=100.0, tol=0.5):
+_GEOCENTRIC = Transformer.from_crs("EPSG:4326", "EPSG:4978", always_xy=True)
+
+
+def geocentric(lonlat):
+    """(n, 2) longitude, latitude in degrees -> (n, 3) Earth-centred x, y, z in km on the WGS84 ellipsoid. Straight-line
+    distances there equal surface distances to 0.001 km within 100 km, anywhere on Earth."""
+    return np.column_stack(_GEOCENTRIC.transform(lonlat[:, 0], lonlat[:, 1], np.zeros(len(lonlat)))) / 1e3
+
+
+def local_projection(locs):
+    """Azimuthal equidistant projection (WGS84, as in ADLoc) centred on the stations of locs = (longitude, latitude, z).
+    Returns locs with longitude, latitude replaced by x, y in km, and the projection to map events back."""
+    c = geocentric(np.unique(locs[:, :2], axis=0)).mean(0)
+    lon0, lat0 = np.degrees(np.arctan2(c[1], c[0])), np.degrees(np.arctan2(c[2], np.hypot(c[0], c[1])))
+    proj = Proj(f"+proj=aeqd +lon_0={lon0} +lat_0={lat0} +units=km +ellps=WGS84")
+    x, y = proj(locs[:, 0], locs[:, 1])
+    return np.column_stack([x, y, locs[:, 2:]]), proj
+
+
+def link_picks(data, xy, phase_type, vel, max_km=100.0, tol=0.5):
     """Pairs of picks that one event could produce, as a sparse distance graph for DBSCAN(metric="precomputed").
     Stations closer than max_km link when the time difference fits the distance between them: same phase
     |dt| <= dx / v + tol; P at i then S at j within -dx / vp - tol <= tS - tP <= max_km (1/vs - 1/vp) + dx / vs + tol.
-    Two picks at one station link only within tol, so two events there never link."""
+    Two picks at one station link only within tol, so two events there never link.
+    xy (n, 2 or 3): station positions in km, projected x, y or Earth-centred x, y, z."""
     vp, vs = vel["p"], vel["s"]
-    t, xy, s = data[:, 0], locs[:, :2], phase_type == "s"
+    t, s = data[:, 0], phase_type == "s"
     sp_max = max_km * (1 / vs - 1 / vp)
     reach = np.hypot((sp_max + max_km / vs + tol) * vs, max_km)  # every compatible pair is within this in (t vs, x, y)
     i, j = cKDTree(np.column_stack([t * vs, xy])).query_pairs(reach, output_type="ndarray").T
@@ -202,15 +223,16 @@ def focused_origin_time(data, locs, phase_type, vel, bw=1.0, grid_km=25.0, depth
     return sharpest(np.arange(R[0] - c, R[0] + c + 1e-6, grid_km), np.arange(R[1] - c, R[1] + c + 1e-6, grid_km))[1]
 
 
-def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=0.5, min_samples=3, bw=1.0):
+def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=0.5, min_samples=3, bw=1.0, geo=False):
     """Cut the picks into small segments for the mixture, each holding whole events. Returns a list of index arrays.
 
     Repeat on every piece until all are done:
     1. Space: split the piece into groups of linked picks (DBSCAN on the links of link_picks: picks one event could
        produce), which separates regions without breaking events; picks left as noise are dropped.
     2. Time: a group above max_picks is cut at the quietest moment of its focused origin time u (the fewest picks
-       within +-bw; ties: the largest gap), and both halves go back to step 1."""
-    graph = link_picks(data, locs, phase_type, vel, max_km, tol)
+       within +-bw; ties: the largest gap), and both halves go back to step 1.
+    geo: locs are (longitude, latitude, z); picks link on the globe and each piece is projected around its stations."""
+    graph = link_picks(data, geocentric(locs[:, :2]) if geo else locs[:, :2], phase_type, vel, max_km, tol)
     segments, stack = [], [np.arange(len(data))]
     while stack:
         seg = stack.pop()
@@ -221,7 +243,7 @@ def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=
             stack += groups
         elif len(groups) == 1 and len(groups[0]) > max_picks:
             g = groups[0]
-            u = focused_origin_time(data[g], locs[g], phase_type[g], vel, bw)
+            u = focused_origin_time(data[g], local_projection(locs[g])[0] if geo else locs[g], phase_type[g], vel, bw)
             g, us = g[np.argsort(u)], np.sort(u)
             m = len(us) // 10  # never cut off a sliver
             mid = (us[m : len(us) - m - 1] + us[m + 1 : len(us) - m]) / 2
@@ -234,52 +256,85 @@ def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=
 
 
 def translate_old_config(config):
-    """Rename settings from before 1.5 / 1.7 in place, with a visible warning, so old configs keep running.
-    A new key, when also set, wins."""
-    renamed = {"max_sigma11": "max_residual_time", "max_sigma22": "max_residual_amplitude"}
-    for old, new in renamed.items():
-        if old in config:
-            config.setdefault(new, config.pop(old))
-            warnings.warn(
-                f"config['{old}'] is renamed config['{new}'] (now {config[new]}); since 1.5 it limits the residual "
-                "after each event is relocated, so old values are looser than before (default 1.0)",
-                stacklevel=3,
-            )
+    """Rename settings from before 1.5 / 1.7 / 1.8 in place, so old configs keep running; one warning lists every
+    change. A new key, when also set, wins. Since 1.8 the names follow ADLoc."""
+    done = []
+
+    def rename(d, old, new, where="config", note=""):
+        if old in d:
+            d.setdefault(new, d.pop(old))
+            done.append(f"{where}['{old}'] -> {where}['{new}']{note}")
+
+    looser = " (since 1.5 it limits the residual after each event is relocated, so old values are looser)"
+    rename(config, "max_sigma11", "max_residual_time", note=looser)
+    rename(config, "max_sigma22", "max_residual_amplitude", note=looser)
+    for old, new in [("min_picks_per_eq", "min_picks"), ("min_p_picks_per_eq", "min_p_picks"),
+                     ("min_s_picks_per_eq", "min_s_picks"), ("x(km)", "xlim_km"), ("y(km)", "ylim_km"),
+                     ("z(km)", "zlim_km")]:
+        rename(config, old, new)
+    for old in [k for k in config.get("vel", {}) if k.islower()]:
+        rename(config["vel"], old, old.upper(), "config['vel']")
+    if config.get("eikonal") is not None:
+        for old in ("xlim", "ylim", "zlim"):
+            rename(config["eikonal"], old, old + "_km", "config['eikonal']")
+        for old in [k for k in config["eikonal"].get("vel", {}) if k.islower()]:
+            rename(config["eikonal"]["vel"], old, old.upper(), "config['eikonal']['vel']")
     if "max_sigma12" in config:
         config.pop("max_sigma12")
-        warnings.warn("config['max_sigma12'] is ignored: the covariance check was removed in 1.5", stacklevel=3)
+        done.append("config['max_sigma12'] is ignored (the covariance check was removed in 1.5)")
     if "use_dbscan" in config:
         config.setdefault("segment", "link" if config.pop("use_dbscan") else None)
-        warnings.warn(
-            f"config['use_dbscan'] is replaced by config['segment'] (now {config['segment']!r}): 'link' (default), "
-            "'dbscan' (the cut before 1.7) or None (one segment)",
-            stacklevel=3,
-        )
+        done.append(f"config['use_dbscan'] -> config['segment'] = {config['segment']!r} ('link', 'dbscan' or None)")
+    if any("(km)" in d for d in config.get("dims", [])):
+        done.append(f"config['dims'] {config['dims']}: use 'x_km', 'y_km', 'z_km'; events keep the names given in dims")
+    if done:
+        msg = "GaMMA uses ADLoc's names since 1.8; old settings translated:\n  " + "\n  ".join(done)
+        warnings.warn(msg, stacklevel=3)
+
+
+def translate_old_columns(picks, stations, dims):
+    """Rename columns from before 1.8 to ADLoc's names on copies, with a visible warning."""
+    old = {"id": "station_id", "timestamp": "phase_time", "type": "phase_type", "prob": "phase_score",
+           "amp": "phase_amplitude"}
+    found = {o: n for o, n in old.items() if o in picks and n not in picks}
+    if found:
+        picks = picks.rename(columns=found)
+        warnings.warn(f"picks columns {list(found)} are renamed {list(found.values())} (as ADLoc)", stacklevel=3)
+    alias = {"x_km": "x(km)", "y_km": "y(km)", "z_km": "z(km)", "x(km)": "x_km", "y(km)": "y_km", "z(km)": "z_km"}
+    found = {"id": "station_id"} if ("id" in stations and "station_id" not in stations) else {}
+    found.update({alias[d]: d for d in dims if d not in stations and alias.get(d) in stations})
+    if found:
+        stations = stations.rename(columns=found)
+        warnings.warn(f"stations columns {list(found)} are renamed {list(found.values())}", stacklevel=3)
+    return picks, stations
 
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     translate_old_config(config)
+    picks, stations = translate_old_columns(picks, stations, config["dims"])
 
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
         picks, stations, config
     )
 
-    if len(data) < config["min_picks_per_eq"]:
+    if len(data) < config["min_picks"]:
         return [], []
 
-    vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
-    if ("eikonal" not in config) or (config["eikonal"] is None):
-        config["eikonal"] = None
-    else:
-        config["eikonal"] = initialize_eikonal(config["eikonal"])
+    v = config.get("vel", {"P": 6.0, "S": 6.0 / 1.73})
+    vel = {"p": v["P"], "s": v["S"]}  # internally phases are lowercase
 
     # cut the picks into segments for the mixture. "link" (default): groups of picks one event could produce, at most
     # segment_max_picks each; "dbscan": the hierarchical DBSCAN cut; None: all picks in one segment
     segment = config.get("segment", "link")
     if segment not in ("link", "dbscan", None):
         raise ValueError(f"config['segment'] = {segment!r}; use 'link', 'dbscan' or None")
+    # dims (longitude, latitude, z_km): each segment is projected around its own stations, as ADLoc does per event,
+    # so one run can cover any area, up to the whole globe
+    geo = config["dims"][:2] == ["longitude", "latitude"]
+    if geo and (segment != "link" or len(config["dims"]) != 3):
+        raise ValueError("dims (longitude, latitude, z_km) need segment 'link', which keeps each segment local")
     if segment == "link":
-        segments = segment_picks(data, locs, phase_type, vel, max_picks=config.get("segment_max_picks", 200))
+        segments = segment_picks(data, locs, phase_type, vel, max_picks=config.get("segment_max_picks", 200), geo=geo)
         labels = np.full(len(data), -1)
         for k, seg in enumerate(sorted(segments, key=lambda i: data[i, 0].min())):  # numbered in time order
             labels[seg] = k
@@ -309,39 +364,44 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         labels = np.zeros(len(data))
         unique_labels = [0]
 
+    # one task per segment: its picks in km, and for geographic dims its own location bounds (its stations +- 300 km)
+    # and the projection that takes its events back to degrees
+    tasks, projs = [], {}
+    for k in unique_labels:
+        idx = labels == k
+        xyz, bounds = locs[idx], None
+        if geo:
+            xyz, projs[k] = local_projection(xyz)
+            lo, hi = xyz[:, :2].min(0) - 300.0, xyz[:, :2].max(0) + 300.0
+            z0, z1 = config["zlim_km"]
+            bounds = ((lo[0], hi[0]), (lo[1], hi[1]), (z0, z1 + 1), (None, None))
+        tasks.append(
+            (k, data[idx], xyz, phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx], bounds)
+        )
+
+    if ("eikonal" not in config) or (config["eikonal"] is None):
+        config["eikonal"] = None
+    else:
+        if geo:  # the travel-time table only has to reach across the largest segment's bounds
+            rmax = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for *_, b in tasks], default=1.0)
+            config["eikonal"] = {**config["eikonal"], "rmax_km": rmax}
+        config["eikonal"] = initialize_eikonal(config["eikonal"])
+
     if "ncpu" not in config:
         config["ncpu"] = max(1, min(len(unique_labels) // 4, min(32, mp.cpu_count() - 1)))
     else:
         config["ncpu"] = min(mp.cpu_count(), config["ncpu"])
 
     if config["ncpu"] == 1:
-        # event_idx0 - 1 as event_idx is increased before use, as in the parallel path
-        event_idx = event_idx0 - 1
-        events, assignment = [], []
-        for unique_label in tqdm(sorted(unique_labels), desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster"):
-            events_, assignment_ = associate(
-                unique_label,
-                labels,
-                data,
-                locs,
-                phase_type,
-                phase_weight,
-                pick_idx,
-                pick_station_id,
-                config,
-                timestamp0,
-                vel,
-                method,
-                event_idx,
-            )
-            event_idx += len(events_)
-            events.extend(events_)
-            assignment.extend(assignment_)
+        _init_worker((config, timestamp0, vel, method, None))
+        progress = tqdm(tasks, desc=f"Associating {len(data)} picks (1 CPU)", unit="cluster")
+        results = {task[0]: _associate_cluster(task) for task in progress}
     else:
         # the following sort and shuffle is to make sure jobs are distributed evenly
         counter = Counter(labels)
         unique_labels = sorted(unique_labels, key=lambda x: counter[x], reverse=True)
         np.random.RandomState(42).shuffle(unique_labels)  # its own generator: the same order every run
+        by_label = {task[0]: task for task in tasks}
 
         # the default chunk_size is len(unique_labels)//(config["ncpu"]*4), which makes some jobs very heavy
         chunk_size = max(len(unique_labels) // (config["ncpu"] * 20), 1)
@@ -365,12 +425,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 shared_config = {**config, "eikonal": eikonal}
             shared = (shared_config, timestamp0, vel, method, tables)
             with mp.get_context(context).Pool(config["ncpu"], initializer=_init_worker, initargs=(shared,)) as p:
-                args = []
-                for k in unique_labels:
-                    idx = labels == k
-                    args.append(
-                        (k, data[idx], locs[idx], phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx])
-                    )
+                args = [by_label[k] for k in unique_labels]
                 # imap (in order, like starmap) so a progress bar can follow the clusters as they finish
                 progress = tqdm(
                     p.imap(_associate_cluster, args, chunksize=chunk_size),
@@ -380,15 +435,19 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 )
                 results = dict(zip(unique_labels, progress))
 
-        # number events in cluster order from event_idx0, as the serial path does, not in the order clusters finish
-        events, assignment, event_idx = [], [], event_idx0
-        for k in sorted(results):
-            each_events, each_assignment = results[k]
-            for event in each_events:
-                event["event_index"] += event_idx
-            events.extend(each_events)
-            assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
-            event_idx += len(each_events)
+    # number events in cluster order from event_idx0, not in the order clusters finish; coordinates back to the names
+    # in dims, and to degrees for geographic dims
+    names = dict(zip(["x_km", "y_km", "z_km"], config["dims"]))
+    events, assignment, event_idx = [], [], event_idx0
+    for k in sorted(results):
+        each_events, each_assignment = results[k]
+        for event in each_events:
+            if k in projs:
+                event["x_km"], event["y_km"] = projs[k](event["x_km"], event["y_km"], inverse=True)
+            event["event_index"] += event_idx
+            events.append({names.get(key, key): value for key, value in event.items()})
+        assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
+        event_idx += len(each_events)
 
     print(f"Associated {len(events)} events with {len(assignment)} picks")
     return events, assignment  # , event_idx.value
@@ -407,8 +466,10 @@ def _init_worker(shared):
 
 def _associate_cluster(task):
     """associate() on one cluster's picks; its events are numbered from 0 and renumbered by the caller"""
-    k, data, locs, phase_type, phase_weight, pick_idx, pick_station_id = task
+    k, data, locs, phase_type, phase_weight, pick_idx, pick_station_id, bounds = task
     config, timestamp0, vel, method = _SHARED
+    if bounds is not None:  # this segment's own location bounds (geographic dims)
+        config = {**config, "bfgs_bounds": bounds}
     labels = np.full(len(data), k)
     return associate(k, labels, data, locs, phase_type, phase_weight, pick_idx, pick_station_id, config, timestamp0, vel, method, -1)
 
@@ -438,7 +499,7 @@ def associate(
     max_num_event = max(Counter(pick_station_id_).values()) * config["oversample_factor"]
     max_num_event = min(max_num_event, len(data_) // 3)
 
-    if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
+    if len(pick_idx_) < max(3, config["min_picks"]):
         return [], []
 
     # time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
@@ -516,16 +577,16 @@ def associate(
     events, assignment = [], []
     for i in range(max_num_event):
         idx = np.flatnonzero(pred == i)
-        if len(idx) < config["min_picks_per_eq"]:
+        if len(idx) < config["min_picks"]:
             continue
         keep, center, res = refit_event(
             gmm.centers_[i], data_[idx], locs_[idx], phase_type_[idx], phase_weight_[idx], config, vel
         )
         idx, res, ph = idx[keep], res[keep], phase_type_[idx[keep]]
         if (
-            len(idx) < config["min_picks_per_eq"]
-            or np.sum(ph == "p") < config.get("min_p_picks_per_eq", 0)
-            or np.sum(ph == "s") < config.get("min_s_picks_per_eq", 0)
+            len(idx) < config["min_picks"]
+            or np.sum(ph == "p") < config.get("min_p_picks", 0)
+            or np.sum(ph == "s") < config.get("min_s_picks", 0)
             or len(np.unique(locs_[idx], axis=0)) < config.get("min_stations", 0)
         ):
             continue
@@ -544,7 +605,8 @@ def associate(
             "num_p_picks": int(np.sum(ph == "p")),
             "num_s_picks": int(np.sum(ph == "s")),
             "event_index": event_idx,
-            **dict(zip(config["dims"], center[:D])),
+            **dict(zip(["x_km", "y_km", "z_km"], center[:D])),  # renamed to the names in dims by association()
+            **({"depth_km": center[2]} if D == 3 else {}),  # as ADLoc
         }
         events.append(event)
         assignment.extend(zip(pick_idx_[idx], [event_idx] * len(idx), prob[idx]))  # each pick's own score
@@ -674,19 +736,12 @@ def init_centers(config, data_, locs_, type_, vel, max_num_event=1):
     # each event starts at its seed pick's station at mid depth, with origin time = the seed's arrival minus the travel
     # time from there (straight ray); the arrival time itself would start every predicted arrival late
     x_init, y_init = locs_[index, 0], locs_[index, 1]
-    z_init = np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
+    z_init = np.ones(max_num_event) * (config["zlim_km"][0] + config["zlim_km"][1]) / 2.0
     xyz = np.column_stack([x_init, y_init, z_init])[:, : locs_.shape[1]]
     v = np.where(type_[index] == "p", vel["p"], vel["s"])
     t_init = data_[index, 0] - np.linalg.norm(xyz - locs_[index], axis=1) / v
 
-    if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
-        centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
-    elif config["dims"] == ["x(km)", "y(km)"]:
-        centers_init = np.vstack([x_init, y_init, t_init]).T
-    elif config["dims"] == ["x(km)"]:
-        centers_init = np.vstack([x_init, t_init]).T
-    else:
-        raise ValueError("Unsupported dims")
+    centers_init = np.vstack([*xyz.T, t_init]).T  # location in the first len(dims) coordinates, then origin time
 
     if config["use_amplitude"]:
         centers_init = np.hstack([centers_init, 1.0 * np.ones((len(centers_init), 1))])  # init magnitude to 1.0
