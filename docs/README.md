@@ -37,7 +37,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   "ylim": y_range, 
   "zlim": z_range}
   ```
-  - **segment** (default = "link"): how to cut a long sequence of picks into segments, which speeds up association a lot. "link": groups of picks that one event could produce (stations within 100 km whose time differences fit the distance between them), each at most **segment_max_picks** (default = 200) picks, split further in time. "dbscan": the hierarchical DBSCAN cut below, the default before 1.7.0. None: all picks in one segment. It replaces `use_dbscan` (True → "dbscan" for the old behaviour, False → None).
+  - **segment** (default = "link"): how to cut a long sequence of picks into segments, which speeds up association a lot. "link": groups of picks that one event could produce (stations within 100 km whose time differences fit the distance between them), each at most **segment_max_picks** (default = 200) picks, split further in time. "dbscan": the hierarchical DBSCAN cut below, the default before 1.7.0. None: all picks in one segment. It replaces `use_dbscan`, which still works with a warning (True → "link", False → None; use "dbscan" for the cut before 1.7.0).
   - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as a neighbor of the other. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
   - **dbscan_min_samples** (default = 3): The number of samples in a neighborhood for a point to be considered as a core point. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
   - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
@@ -49,6 +49,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   	- **min_s_picks_per_eq**: Minimum S-picks for associated earthquakes.
     - **max_residual_time** (default = 1.0): Max phase time residual (s)
     - **max_residual_amplitude** (default = 1.0): Max phase amplitude residual (log10 scale)
+    - The old names `max_sigma11` and `max_sigma22` still work with a warning, as max_residual_time and max_residual_amplitude; `max_sigma12` is ignored.
 
 Note the association speed is controlled by **dbscan_eps** and **oversampling_factor**. Larger values are preferred, but at the expense of a slower association speed.
 
