@@ -30,7 +30,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   - With **dims** = ["longitude", "latitude", "z_km"], stations are given in degrees and one run can cover any area, up to the whole globe: picks link on the globe, each segment is projected around its own stations (azimuthal equidistant, as ADLoc does per event), its events are located within 300 km of those stations, and come back in longitude, latitude. Needs segment "link", which keeps each segment local.
   - Events come back with the coordinates named in dims, plus depth_km. Names from before 1.8 (id, timestamp, type, prob, amp, x(km), min_picks_per_eq, ...) still work and are translated with one warning.
 - Hyperparameters:
-  - **xlim_km**, **ylim_km**, **zlim_km**: the region (km); zlim_km also sets the depth where each event starts.
+  - **xlim_km**, **ylim_km**, **zlim_km**: the region (km) where events can be: the locator's bounds, and zlim_km also sets the depth where each event starts. **bfgs_bounds**, when given, overrides the bounds.
   - **use_amplitude** (default = True): If using amplitude information.
   - **vel** (default = {"P": 6.0, "S": 6.0 / 1.73}): velocity for P and S phases (uniform velocity model).
   - **eikonal** (optional): When specified, the 1D velocity model overrides the uniform velocity model:
@@ -39,10 +39,9 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   "P": [p_velocities],
   "S": [s_velocities]},
   "h": grid_spacing,
-  "xlim_km": x_range,
-  "ylim_km": y_range,
-  "zlim_km": z_range}
+  "zlim_km": z_range}  # optional: the tables' depth range; default the events' zlim_km
   ```
+  The tables reach across the farthest event-station pair (the region and the stations together); **xlim_km** and **ylim_km** here, when given, set that range instead. Set the tables' **zlim_km** deeper than the events' (e.g. (0, 60), below the Moho) so far stations' first arrivals (Pn) are modelled while events stay within the region; a range that does not cover the events' zlim_km is widened to cover it, with a warning.
   Since 1.10.0 the 1D model is read at absolute depth, as in ADLoc and ADTomo: one travel-time table per station depth (stations within 100 m share one), so a station 2 km above sea level sees the same layers as one at sea level, 2 km further up. Event depths (z_km, depth_km) are below sea level; before 1.10.0 the model hung from each station, and depths were measured from the station surface (about the stations' mean elevation shallower).
   - **segment** (default = "link"): how to cut a long sequence of picks into segments, which speeds up association a lot. "link": groups of picks that one event could produce (stations within 100 km whose time differences fit the distance between them), each at most **segment_max_picks** (default = 200) picks, split further in time. "dbscan": the hierarchical DBSCAN cut below, the default before 1.7.0. None: all picks in one segment. It replaces `use_dbscan`, which still works with a warning (True → "link", False → None; use "dbscan" for the cut before 1.7.0).
   - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as a neighbor of the other. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)

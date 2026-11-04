@@ -364,6 +364,11 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         labels = np.zeros(len(data))
         unique_labels = [0]
 
+    # where events can be: the region xlim_km, ylim_km, zlim_km (bfgs_bounds, when given, overrides it)
+    if not geo and "bfgs_bounds" not in config:
+        region = [config["xlim_km"], config["ylim_km"], config["zlim_km"]][: len(config["dims"])]
+        config["bfgs_bounds"] = (*[tuple(b) for b in region], (None, None))
+
     # one task per segment: its picks in km, and for geographic dims its own location bounds (its stations +- 300 km)
     # and the projection that takes its events back to degrees
     tasks, projs = [], {}
@@ -373,8 +378,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         if geo:
             xyz, projs[k] = local_projection(xyz)
             lo, hi = xyz[:, :2].min(0) - 300.0, xyz[:, :2].max(0) + 300.0
-            z0, z1 = config["zlim_km"]
-            bounds = ((lo[0], hi[0]), (lo[1], hi[1]), (z0, z1 + 1), (None, None))
+            bounds = ((lo[0], hi[0]), (lo[1], hi[1]), tuple(config["zlim_km"]), (None, None))
         tasks.append(
             (k, data[idx], xyz, phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx], bounds)
         )
@@ -382,11 +386,25 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     if ("eikonal" not in config) or (config["eikonal"] is None):
         config["eikonal"] = None
     else:
-        if geo:  # the travel-time table only has to reach across the largest segment's bounds
-            rmax = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for *_, b in tasks], default=1.0)
-            config["eikonal"] = {**config["eikonal"], "rmax_km": rmax}
-        # one table per station depth (station z_km, absolute, positive down), as in ADLoc
-        config["eikonal"] = initialize_eikonal({**config["eikonal"], "station_z_km": locs[:, 2]})
+        # one table per station depth (station z_km, absolute, positive down), as in ADLoc; as deep as the events
+        # unless eikonal zlim_km is set (e.g. (0, 60), below the Moho, so far first arrivals are modelled)
+        eik = {"zlim_km": config["zlim_km"], **config["eikonal"], "station_z_km": locs[:, 2]}
+        (ez0, ez1), (z0, z1) = eik["zlim_km"], config["zlim_km"]
+        if ez0 > z0 or ez1 < z1:  # the tables must cover every depth an event can take
+            eik["zlim_km"] = (min(ez0, z0), max(ez1, z1))
+            warnings.warn(
+                f"config['eikonal']['zlim_km'] = {(ez0, ez1)} does not cover the events' config['zlim_km'] = "
+                f"{(z0, z1)}; the tables use {eik['zlim_km']}",
+                stacklevel=2,
+            )
+        if geo:  # the tables only have to reach across the largest segment's bounds
+            eik["rmax_km"] = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for *_, b in tasks], default=1.0)
+        elif "xlim_km" not in eik:  # across the farthest event-station pair: the region and the stations together
+            (x0, x1), (y0, y1) = config["bfgs_bounds"][:2]
+            dx = max(x1, locs[:, 0].max()) - min(x0, locs[:, 0].min())
+            dy = max(y1, locs[:, 1].max()) - min(y0, locs[:, 1].min())
+            eik["rmax_km"] = np.hypot(dx, dy)
+        config["eikonal"] = initialize_eikonal(eik)
 
     if "ncpu" not in config:
         config["ncpu"] = max(1, min(len(unique_labels) // 4, min(32, mp.cpu_count() - 1)))
