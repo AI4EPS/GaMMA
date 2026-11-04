@@ -27,7 +27,7 @@ def random_seed():
 
 # def estimate_station_spacing(stations):
 def estimate_eps(stations, vp, sigma=2.0):
-    X = stations[["x(km)", "y(km)", "z(km)"]].values
+    X = stations[["x_km", "y_km", "z_km"] if "x_km" in stations else ["x(km)", "y(km)", "z(km)"]].values
     D = np.sqrt(((X[:, np.newaxis, :] - X[np.newaxis, :, :]) ** 2).sum(axis=-1))
 
     D[D == 0] = np.inf
@@ -54,11 +54,11 @@ def estimate_eps(stations, vp, sigma=2.0):
 
 def convert_picks_csv(picks, stations, config):
     # t = picks["timestamp"].apply(lambda x: x.timestamp()).to_numpy()
-    if type(picks["timestamp"].iloc[0]) is str:
+    if type(picks["phase_time"].iloc[0]) is str:
         # replace the column: writing datetimes into a string column in place fails on pandas >= 3
-        picks["timestamp"] = picks["timestamp"].apply(lambda x: datetime.fromisoformat(x))
+        picks["phase_time"] = picks["phase_time"].apply(lambda x: datetime.fromisoformat(x))
     t = (
-        picks["timestamp"]
+        picks["phase_time"]
         .apply(lambda x: x.tz_convert("UTC").timestamp() if x.tzinfo is not None else x.tz_localize("UTC").timestamp())
         .to_numpy()
     )
@@ -66,15 +66,15 @@ def convert_picks_csv(picks, stations, config):
     timestamp0 = np.min(t)
     t = t - timestamp0
     if config["use_amplitude"]:
-        a = picks["amp"].apply(lambda x: np.log10(x * 1e2)).to_numpy()  ##cm/s
+        a = picks["phase_amplitude"].apply(lambda x: np.log10(x * 1e2)).to_numpy()  ##cm/s
         data = np.stack([t, a]).T
     else:
         data = t[:, np.newaxis]
-    meta = stations.merge(picks["id"], how="right", on="id", validate="one_to_many")
+    meta = stations.merge(picks["station_id"], how="right", on="station_id", validate="one_to_many")
     locs = meta[config["dims"]].to_numpy()
-    phase_type = picks["type"].apply(lambda x: x.lower()).to_numpy()
-    phase_weight = picks["prob"].to_numpy()[:, np.newaxis]
-    pick_station_id = picks.apply(lambda x: x.id + "_" + x.type, axis=1).to_numpy()
+    phase_type = picks["phase_type"].apply(lambda x: x.lower()).to_numpy()
+    phase_weight = picks["phase_score"].to_numpy()[:, np.newaxis]
+    pick_station_id = picks.apply(lambda x: x.station_id + "_" + x.phase_type, axis=1).to_numpy()
     nan_idx = meta.isnull().any(axis=1)
     return (
         data[~nan_idx],
@@ -234,40 +234,72 @@ def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=
 
 
 def translate_old_config(config):
-    """Rename settings from before 1.5 / 1.7 in place, with a visible warning, so old configs keep running.
-    A new key, when also set, wins."""
-    renamed = {"max_sigma11": "max_residual_time", "max_sigma22": "max_residual_amplitude"}
-    for old, new in renamed.items():
-        if old in config:
-            config.setdefault(new, config.pop(old))
-            warnings.warn(
-                f"config['{old}'] is renamed config['{new}'] (now {config[new]}); since 1.5 it limits the residual "
-                "after each event is relocated, so old values are looser than before (default 1.0)",
-                stacklevel=3,
-            )
+    """Rename settings from before 1.5 / 1.7 / 1.8 in place, so old configs keep running; one warning lists every
+    change. A new key, when also set, wins. Since 1.8 the names follow ADLoc."""
+    done = []
+
+    def rename(d, old, new, where="config", note=""):
+        if old in d:
+            d.setdefault(new, d.pop(old))
+            done.append(f"{where}['{old}'] -> {where}['{new}']{note}")
+
+    looser = " (since 1.5 it limits the residual after each event is relocated, so old values are looser)"
+    rename(config, "max_sigma11", "max_residual_time", note=looser)
+    rename(config, "max_sigma22", "max_residual_amplitude", note=looser)
+    for old, new in [("min_picks_per_eq", "min_picks"), ("min_p_picks_per_eq", "min_p_picks"),
+                     ("min_s_picks_per_eq", "min_s_picks"), ("x(km)", "xlim_km"), ("y(km)", "ylim_km"),
+                     ("z(km)", "zlim_km")]:
+        rename(config, old, new)
+    for old in [k for k in config.get("vel", {}) if k.islower()]:
+        rename(config["vel"], old, old.upper(), "config['vel']")
+    if config.get("eikonal") is not None:
+        for old in ("xlim", "ylim", "zlim"):
+            rename(config["eikonal"], old, old + "_km", "config['eikonal']")
+        for old in [k for k in config["eikonal"].get("vel", {}) if k.islower()]:
+            rename(config["eikonal"]["vel"], old, old.upper(), "config['eikonal']['vel']")
     if "max_sigma12" in config:
         config.pop("max_sigma12")
-        warnings.warn("config['max_sigma12'] is ignored: the covariance check was removed in 1.5", stacklevel=3)
+        done.append("config['max_sigma12'] is ignored (the covariance check was removed in 1.5)")
     if "use_dbscan" in config:
         config.setdefault("segment", "link" if config.pop("use_dbscan") else None)
-        warnings.warn(
-            f"config['use_dbscan'] is replaced by config['segment'] (now {config['segment']!r}): 'link' (default), "
-            "'dbscan' (the cut before 1.7) or None (one segment)",
-            stacklevel=3,
-        )
+        done.append(f"config['use_dbscan'] -> config['segment'] = {config['segment']!r} ('link', 'dbscan' or None)")
+    if any("(km)" in d for d in config.get("dims", [])):
+        done.append(f"config['dims'] {config['dims']}: use 'x_km', 'y_km', 'z_km'; events keep the names given in dims")
+    if done:
+        msg = "GaMMA uses ADLoc's names since 1.8; old settings translated:\n  " + "\n  ".join(done)
+        warnings.warn(msg, stacklevel=3)
+
+
+def translate_old_columns(picks, stations, dims):
+    """Rename columns from before 1.8 to ADLoc's names on copies, with a visible warning."""
+    old = {"id": "station_id", "timestamp": "phase_time", "type": "phase_type", "prob": "phase_score",
+           "amp": "phase_amplitude"}
+    found = {o: n for o, n in old.items() if o in picks and n not in picks}
+    if found:
+        picks = picks.rename(columns=found)
+        warnings.warn(f"picks columns {list(found)} are renamed {list(found.values())} (as ADLoc)", stacklevel=3)
+    alias = {"x_km": "x(km)", "y_km": "y(km)", "z_km": "z(km)", "x(km)": "x_km", "y(km)": "y_km", "z(km)": "z_km"}
+    found = {"id": "station_id"} if ("id" in stations and "station_id" not in stations) else {}
+    found.update({alias[d]: d for d in dims if d not in stations and alias.get(d) in stations})
+    if found:
+        stations = stations.rename(columns=found)
+        warnings.warn(f"stations columns {list(found)} are renamed {list(found.values())}", stacklevel=3)
+    return picks, stations
 
 
 def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     translate_old_config(config)
+    picks, stations = translate_old_columns(picks, stations, config["dims"])
 
     data, locs, phase_type, phase_weight, pick_idx, pick_station_id, timestamp0 = convert_picks_csv(
         picks, stations, config
     )
 
-    if len(data) < config["min_picks_per_eq"]:
+    if len(data) < config["min_picks"]:
         return [], []
 
-    vel = config["vel"] if "vel" in config else {"p": 6.0, "s": 6.0 / 1.73}
+    v = config.get("vel", {"P": 6.0, "S": 6.0 / 1.73})
+    vel = {"p": v["P"], "s": v["S"]}  # internally phases are lowercase
     if ("eikonal" not in config) or (config["eikonal"] is None):
         config["eikonal"] = None
     else:
@@ -438,7 +470,7 @@ def associate(
     max_num_event = max(Counter(pick_station_id_).values()) * config["oversample_factor"]
     max_num_event = min(max_num_event, len(data_) // 3)
 
-    if len(pick_idx_) < max(3, config["min_picks_per_eq"]):
+    if len(pick_idx_) < max(3, config["min_picks"]):
         return [], []
 
     # time_range = max(data_[:, 0].max() - data_[:, 0].min(), 1)
@@ -516,16 +548,16 @@ def associate(
     events, assignment = [], []
     for i in range(max_num_event):
         idx = np.flatnonzero(pred == i)
-        if len(idx) < config["min_picks_per_eq"]:
+        if len(idx) < config["min_picks"]:
             continue
         keep, center, res = refit_event(
             gmm.centers_[i], data_[idx], locs_[idx], phase_type_[idx], phase_weight_[idx], config, vel
         )
         idx, res, ph = idx[keep], res[keep], phase_type_[idx[keep]]
         if (
-            len(idx) < config["min_picks_per_eq"]
-            or np.sum(ph == "p") < config.get("min_p_picks_per_eq", 0)
-            or np.sum(ph == "s") < config.get("min_s_picks_per_eq", 0)
+            len(idx) < config["min_picks"]
+            or np.sum(ph == "p") < config.get("min_p_picks", 0)
+            or np.sum(ph == "s") < config.get("min_s_picks", 0)
             or len(np.unique(locs_[idx], axis=0)) < config.get("min_stations", 0)
         ):
             continue
@@ -545,6 +577,7 @@ def associate(
             "num_s_picks": int(np.sum(ph == "s")),
             "event_index": event_idx,
             **dict(zip(config["dims"], center[:D])),
+            **({"depth_km": center[2]} if D == 3 else {}),  # as ADLoc
         }
         events.append(event)
         assignment.extend(zip(pick_idx_[idx], [event_idx] * len(idx), prob[idx]))  # each pick's own score
@@ -674,19 +707,12 @@ def init_centers(config, data_, locs_, type_, vel, max_num_event=1):
     # each event starts at its seed pick's station at mid depth, with origin time = the seed's arrival minus the travel
     # time from there (straight ray); the arrival time itself would start every predicted arrival late
     x_init, y_init = locs_[index, 0], locs_[index, 1]
-    z_init = np.ones(max_num_event) * (config["z(km)"][0] + config["z(km)"][1]) / 2.0
+    z_init = np.ones(max_num_event) * (config["zlim_km"][0] + config["zlim_km"][1]) / 2.0
     xyz = np.column_stack([x_init, y_init, z_init])[:, : locs_.shape[1]]
     v = np.where(type_[index] == "p", vel["p"], vel["s"])
     t_init = data_[index, 0] - np.linalg.norm(xyz - locs_[index], axis=1) / v
 
-    if config["dims"] == ["x(km)", "y(km)", "z(km)"]:
-        centers_init = np.vstack([x_init, y_init, z_init, t_init]).T
-    elif config["dims"] == ["x(km)", "y(km)"]:
-        centers_init = np.vstack([x_init, y_init, t_init]).T
-    elif config["dims"] == ["x(km)"]:
-        centers_init = np.vstack([x_init, t_init]).T
-    else:
-        raise ValueError("Unsupported dims")
+    centers_init = np.vstack([*xyz.T, t_init]).T  # location in the first len(dims) coordinates, then origin time
 
     if config["use_amplitude"]:
         centers_init = np.hstack([centers_init, 1.0 * np.ones((len(centers_init), 1))])  # init magnitude to 1.0

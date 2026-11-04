@@ -321,8 +321,9 @@ def calc_mag_batch(amp, event_loc, station_loc, weight, min=-2, max=8):
 def initialize_eikonal(config):
     path = Path("./eikonal")
     path.mkdir(exist_ok=True)
-    rlim = [0, np.sqrt((config["xlim"][1] - config["xlim"][0]) ** 2 + (config["ylim"][1] - config["ylim"][0]) ** 2)]
-    zlim = config["zlim"]
+    xlim, ylim = config["xlim_km"], config["ylim_km"]
+    rlim = [0, np.sqrt((xlim[1] - xlim[0]) ** 2 + (ylim[1] - ylim[0]) ** 2)]
+    zlim = config["zlim_km"]
     h = config["h"]
 
     # filename = f"timetable_{rlim[0]:.0f}_{rlim[1]:.0f}_{zlim[0]:.0f}_{zlim[1]:.0f}_{h:.3f}"
@@ -345,7 +346,7 @@ def initialize_eikonal(config):
     nr, nz = len(rgrid), len(zgrid)
 
     vel = config["vel"]
-    zz, vp, vs = vel["z"], vel["p"], vel["s"]
+    zz, vp, vs = vel["Z"], vel["P"], vel["S"]  # as ADLoc
     vp1d = np.interp(zgrid, zz, vp)
     vs1d = np.interp(zgrid, zz, vs)
     vp = np.ones((nr, nz)) * vp1d
