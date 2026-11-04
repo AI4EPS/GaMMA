@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+from pyproj import Proj, Transformer
 from scipy.sparse import coo_matrix
 from scipy.spatial import cKDTree
 from sklearn.cluster import DBSCAN
@@ -154,13 +155,33 @@ def hierarchical_dbscan_clustering(
     return labels
 
 
-def link_picks(data, locs, phase_type, vel, max_km=100.0, tol=0.5):
+_GEOCENTRIC = Transformer.from_crs("EPSG:4326", "EPSG:4978", always_xy=True)
+
+
+def geocentric(lonlat):
+    """(n, 2) longitude, latitude in degrees -> (n, 3) Earth-centred x, y, z in km on the WGS84 ellipsoid. Straight-line
+    distances there equal surface distances to 0.001 km within 100 km, anywhere on Earth."""
+    return np.column_stack(_GEOCENTRIC.transform(lonlat[:, 0], lonlat[:, 1], np.zeros(len(lonlat)))) / 1e3
+
+
+def local_projection(locs):
+    """Azimuthal equidistant projection (WGS84, as in ADLoc) centred on the stations of locs = (longitude, latitude, z).
+    Returns locs with longitude, latitude replaced by x, y in km, and the projection to map events back."""
+    c = geocentric(np.unique(locs[:, :2], axis=0)).mean(0)
+    lon0, lat0 = np.degrees(np.arctan2(c[1], c[0])), np.degrees(np.arctan2(c[2], np.hypot(c[0], c[1])))
+    proj = Proj(f"+proj=aeqd +lon_0={lon0} +lat_0={lat0} +units=km +ellps=WGS84")
+    x, y = proj(locs[:, 0], locs[:, 1])
+    return np.column_stack([x, y, locs[:, 2:]]), proj
+
+
+def link_picks(data, xy, phase_type, vel, max_km=100.0, tol=0.5):
     """Pairs of picks that one event could produce, as a sparse distance graph for DBSCAN(metric="precomputed").
     Stations closer than max_km link when the time difference fits the distance between them: same phase
     |dt| <= dx / v + tol; P at i then S at j within -dx / vp - tol <= tS - tP <= max_km (1/vs - 1/vp) + dx / vs + tol.
-    Two picks at one station link only within tol, so two events there never link."""
+    Two picks at one station link only within tol, so two events there never link.
+    xy (n, 2 or 3): station positions in km, projected x, y or Earth-centred x, y, z."""
     vp, vs = vel["p"], vel["s"]
-    t, xy, s = data[:, 0], locs[:, :2], phase_type == "s"
+    t, s = data[:, 0], phase_type == "s"
     sp_max = max_km * (1 / vs - 1 / vp)
     reach = np.hypot((sp_max + max_km / vs + tol) * vs, max_km)  # every compatible pair is within this in (t vs, x, y)
     i, j = cKDTree(np.column_stack([t * vs, xy])).query_pairs(reach, output_type="ndarray").T
@@ -202,15 +223,16 @@ def focused_origin_time(data, locs, phase_type, vel, bw=1.0, grid_km=25.0, depth
     return sharpest(np.arange(R[0] - c, R[0] + c + 1e-6, grid_km), np.arange(R[1] - c, R[1] + c + 1e-6, grid_km))[1]
 
 
-def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=0.5, min_samples=3, bw=1.0):
+def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=0.5, min_samples=3, bw=1.0, geo=False):
     """Cut the picks into small segments for the mixture, each holding whole events. Returns a list of index arrays.
 
     Repeat on every piece until all are done:
     1. Space: split the piece into groups of linked picks (DBSCAN on the links of link_picks: picks one event could
        produce), which separates regions without breaking events; picks left as noise are dropped.
     2. Time: a group above max_picks is cut at the quietest moment of its focused origin time u (the fewest picks
-       within +-bw; ties: the largest gap), and both halves go back to step 1."""
-    graph = link_picks(data, locs, phase_type, vel, max_km, tol)
+       within +-bw; ties: the largest gap), and both halves go back to step 1.
+    geo: locs are (longitude, latitude, z); picks link on the globe and each piece is projected around its stations."""
+    graph = link_picks(data, geocentric(locs[:, :2]) if geo else locs[:, :2], phase_type, vel, max_km, tol)
     segments, stack = [], [np.arange(len(data))]
     while stack:
         seg = stack.pop()
@@ -221,7 +243,7 @@ def segment_picks(data, locs, phase_type, vel, max_picks=200, max_km=100.0, tol=
             stack += groups
         elif len(groups) == 1 and len(groups[0]) > max_picks:
             g = groups[0]
-            u = focused_origin_time(data[g], locs[g], phase_type[g], vel, bw)
+            u = focused_origin_time(data[g], local_projection(locs[g])[0] if geo else locs[g], phase_type[g], vel, bw)
             g, us = g[np.argsort(u)], np.sort(u)
             m = len(us) // 10  # never cut off a sliver
             mid = (us[m : len(us) - m - 1] + us[m + 1 : len(us) - m]) / 2
@@ -300,18 +322,19 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     v = config.get("vel", {"P": 6.0, "S": 6.0 / 1.73})
     vel = {"p": v["P"], "s": v["S"]}  # internally phases are lowercase
-    if ("eikonal" not in config) or (config["eikonal"] is None):
-        config["eikonal"] = None
-    else:
-        config["eikonal"] = initialize_eikonal(config["eikonal"])
 
     # cut the picks into segments for the mixture. "link" (default): groups of picks one event could produce, at most
     # segment_max_picks each; "dbscan": the hierarchical DBSCAN cut; None: all picks in one segment
     segment = config.get("segment", "link")
     if segment not in ("link", "dbscan", None):
         raise ValueError(f"config['segment'] = {segment!r}; use 'link', 'dbscan' or None")
+    # dims (longitude, latitude, z_km): each segment is projected around its own stations, as ADLoc does per event,
+    # so one run can cover any area, up to the whole globe
+    geo = config["dims"][:2] == ["longitude", "latitude"]
+    if geo and (segment == "dbscan" or len(config["dims"]) != 3):
+        raise ValueError("dims (longitude, latitude, z_km) work with segment 'link' or None")
     if segment == "link":
-        segments = segment_picks(data, locs, phase_type, vel, max_picks=config.get("segment_max_picks", 200))
+        segments = segment_picks(data, locs, phase_type, vel, max_picks=config.get("segment_max_picks", 200), geo=geo)
         labels = np.full(len(data), -1)
         for k, seg in enumerate(sorted(segments, key=lambda i: data[i, 0].min())):  # numbered in time order
             labels[seg] = k
@@ -341,6 +364,24 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         labels = np.zeros(len(data))
         unique_labels = [0]
 
+    projs, bounds = {}, {}
+    if geo:  # each segment's picks in km on its own projection; its events stay within its stations +- 300 km
+        locs = locs.copy()
+        z_bounds = (config["zlim_km"][0], config["zlim_km"][1] + 1)
+        for k in unique_labels:
+            idx = labels == k
+            locs[idx], projs[k] = local_projection(locs[idx])
+            lo, hi = locs[idx, :2].min(0) - 300.0, locs[idx, :2].max(0) + 300.0
+            bounds[k] = ((lo[0], hi[0]), (lo[1], hi[1]), z_bounds, (None, None))
+
+    if ("eikonal" not in config) or (config["eikonal"] is None):
+        config["eikonal"] = None
+    else:
+        if geo:  # the travel-time table only has to reach across the largest segment's bounds
+            rmax = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for b in bounds.values()], default=1.0)
+            config["eikonal"] = {**config["eikonal"], "xlim_km": (0.0, rmax), "ylim_km": (0.0, 0.0)}
+        config["eikonal"] = initialize_eikonal(config["eikonal"])
+
     if "ncpu" not in config:
         config["ncpu"] = max(1, min(len(unique_labels) // 4, min(32, mp.cpu_count() - 1)))
     else:
@@ -360,12 +401,14 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 phase_weight,
                 pick_idx,
                 pick_station_id,
-                config,
+                {**config, "bfgs_bounds": bounds[unique_label]} if geo else config,
                 timestamp0,
                 vel,
                 method,
                 event_idx,
             )
+            if geo:
+                to_lonlat(events_, projs[unique_label])
             event_idx += len(events_)
             events.extend(events_)
             assignment.extend(assignment_)
@@ -401,7 +444,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
                 for k in unique_labels:
                     idx = labels == k
                     args.append(
-                        (k, data[idx], locs[idx], phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx])
+                        (k, data[idx], locs[idx], phase_type[idx], phase_weight[idx], pick_idx[idx], pick_station_id[idx],
+                         bounds.get(k))
                     )
                 # imap (in order, like starmap) so a progress bar can follow the clusters as they finish
                 progress = tqdm(
@@ -416,6 +460,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         events, assignment, event_idx = [], [], event_idx0
         for k in sorted(results):
             each_events, each_assignment = results[k]
+            if geo:
+                to_lonlat(each_events, projs[k])
             for event in each_events:
                 event["event_index"] += event_idx
             events.extend(each_events)
@@ -424,6 +470,12 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
 
     print(f"Associated {len(events)} events with {len(assignment)} picks")
     return events, assignment  # , event_idx.value
+
+
+def to_lonlat(events, proj):
+    """Events located in a segment's projected km back to longitude, latitude (geographic dims)."""
+    for event in events:
+        event["longitude"], event["latitude"] = proj(event["longitude"], event["latitude"], inverse=True)
 
 
 _SHARED = None  # (config, timestamp0, vel, method), set once per worker
@@ -439,8 +491,10 @@ def _init_worker(shared):
 
 def _associate_cluster(task):
     """associate() on one cluster's picks; its events are numbered from 0 and renumbered by the caller"""
-    k, data, locs, phase_type, phase_weight, pick_idx, pick_station_id = task
+    k, data, locs, phase_type, phase_weight, pick_idx, pick_station_id, bounds = task
     config, timestamp0, vel, method = _SHARED
+    if bounds is not None:  # this segment's own location bounds (geographic dims)
+        config = {**config, "bfgs_bounds": bounds}
     labels = np.full(len(data), k)
     return associate(k, labels, data, locs, phase_type, phase_weight, pick_idx, pick_station_id, config, timestamp0, vel, method, -1)
 

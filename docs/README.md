@@ -27,6 +27,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
 - Inputs (the same names as [ADLoc](https://github.com/AI4EPS/ADLoc) since 1.8):
   - **picks**: columns station_id, phase_time, phase_type ("P" or "S"), phase_score, phase_amplitude (m/s).
   - **stations**: columns station_id and the coordinates named in **dims** (default ["x_km", "y_km", "z_km"], z_km positive down).
+  - With **dims** = ["longitude", "latitude", "z_km"], stations are given in degrees and one run can cover any area, up to the whole globe: picks link on the globe, each segment is projected around its own stations (azimuthal equidistant, as ADLoc does per event), its events are located within 300 km of those stations, and come back in longitude, latitude. Works with segment "link" or None.
   - Events come back with the coordinates named in dims, plus depth_km. Names from before 1.8 (id, timestamp, type, prob, amp, x(km), min_picks_per_eq, ...) still work and are translated with one warning.
 - Hyperparameters:
   - **xlim_km**, **ylim_km**, **zlim_km**: the region (km); zlim_km also sets the depth where each event starts.
