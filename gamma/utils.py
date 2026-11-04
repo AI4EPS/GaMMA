@@ -29,31 +29,16 @@ def random_seed():
     random.seed(42)
 
 
-# def estimate_station_spacing(stations):
 def estimate_eps(stations, vp, sigma=2.0):
-    X = stations[["x_km", "y_km", "z_km"] if "x_km" in stations else ["x(km)", "y(km)", "z(km)"]].values
+    """DBSCAN's eps (s) from the station spacing: the mean + sigma std of each station's second-nearest neighbour
+    distance, over vp, times 1.5. stations: a DataFrame with x_km, y_km, z_km (or x(km), ...), or an (n, 3) array."""
+    if isinstance(stations, pd.DataFrame):
+        stations = stations[["x_km", "y_km", "z_km"] if "x_km" in stations else ["x(km)", "y(km)", "z(km)"]].values
+    X = np.asarray(stations, dtype=float)
     D = np.sqrt(((X[:, np.newaxis, :] - X[np.newaxis, :, :]) ** 2).sum(axis=-1))
-
     D[D == 0] = np.inf
     dist = np.sort(D, axis=1)[:, 1]
-    # dist = np.max(dist)
-
-    std = np.std(dist)
-    dist = np.mean(dist) + sigma * std
-
-    eps = dist / vp * 1.5
-
-    # Tcsr = minimum_spanning_tree(D).toarray()
-
-    # Tcsr = Tcsr[Tcsr > 0]
-    # # mean = np.median(Tcsr)
-    # mean = np.mean(Tcsr)
-    # std = np.std(Tcsr)
-    # eps = (mean + sigma * std) / vp
-
-    # eps = np.max(Tcsr) / vp * 1.5
-
-    return eps
+    return (np.mean(dist) + sigma * np.std(dist)) / vp * 1.5
 
 
 def convert_picks_csv(picks, stations, config):
@@ -102,59 +87,32 @@ def hierarchical_dbscan_clustering(
     min_cluster_size=500,
     max_time_space_ratio=10,
 ):
-    def dbscan2(t, xy, w, ph, vel, eps, min_samples, ratio=1.1):
-        data = np.hstack([t, xy / vel["p"]])  # time, x, y
-        db_ = DBSCAN(eps=eps * ratio, min_samples=min_samples, n_jobs=-1).fit(
-            data, sample_weight=np.squeeze(w, axis=-1)
-        )
-        return db_.labels_
+    """DBSCAN in (time, x / vp, y / vp), weighted by phase_weight. A cluster of at least min_cluster_size picks that
+    lasts longer than max_time_space_ratio times its crossing time is clustered again, eps shrunk by 1.2 per round.
+    A re-clustering is kept only if it splits the cluster, and new labels never reuse an old one.
+    Returns one label per pick, -1 for noise."""
+    X = np.hstack([data[:, :1], phase_loc[:, :2] / vel["p"]])  # time, x, y (s)
+    w = np.squeeze(phase_weight, axis=-1)
 
-    db = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit(
-        np.hstack([data[:, 0:1], phase_loc[:, :2] / vel["p"]]),  # time, x, y
-        sample_weight=np.squeeze(phase_weight, axis=-1),
-    )
+    def cluster(idx, e):
+        return DBSCAN(eps=e, min_samples=min_samples, n_jobs=-1).fit(X[idx], sample_weight=w[idx]).labels_
 
-    labels = db.labels_
-    unique_labels = np.unique(labels)
-    current_label = labels.max() + 1
-    ratio = 1
-
-    for _ in range(50):
-        ratio /= 1.2
-        unique_labels = np.unique(labels)
-        current_label = unique_labels.max() + 1
-        keep_split = False
-
-        for label in tqdm(unique_labels, desc=f"Clustering (eps={eps * ratio:.2f})"):
-            if label == -1:
+    labels = cluster(np.arange(len(X)), eps)
+    for k in range(1, 51):
+        pending = False  # a cluster still too large and too long
+        for label in np.unique(labels[labels >= 0]):
+            idx = np.flatnonzero(labels == label)
+            if len(idx) < min_cluster_size:
                 continue
-
-            idx = labels == label
-            if np.sum(idx) < min_cluster_size:
+            t, xy = X[idx, 0], phase_loc[idx, :2]
+            if t.max() - t.min() < np.linalg.norm(xy.max(axis=0) - xy.min(axis=0)) / vel["p"] * max_time_space_ratio:
                 continue
-
-            t = data[idx, 0:1]
-            xy = phase_loc[idx, :2]
-            w = phase_weight[idx]
-            ph = phase_type[idx]
-
-            dxy = np.linalg.norm(xy.max(axis=0) - xy.min(axis=0))
-            dt = t.max() - t.min()
-            if dt < dxy / vel["p"] * max_time_space_ratio:  # s
-                continue
-            # else:
-            #     print(f"Splitting {len(t)} picks using eps={eps * ratio:.2f}")
-
-            labels_ = dbscan2(t, xy, w, ph, vel, eps=eps, min_samples=min_samples, ratio=ratio)
-            labels_ = np.where(labels_ == -1, -1, labels_ + current_label)
-            labels[idx] = labels_
-
-            current_label = labels_.max() + 1
-            keep_split = True
-
-        if not keep_split:
+            pending = True
+            sub = cluster(idx, eps / 1.2**k)
+            if len(np.unique(sub[sub >= 0])) >= 2:  # split: keep it; else keep the cluster and retry at a smaller eps
+                labels[idx] = np.where(sub >= 0, sub + labels.max() + 1, -1)
+        if not pending:
             break
-
     return labels
 
 
@@ -286,7 +244,7 @@ def translate_old_config(config):
         config.pop("max_sigma12")
         done.append("config['max_sigma12'] is ignored (the covariance check was removed in 1.5)")
     if "use_dbscan" in config:
-        config.setdefault("segment", "link" if config.pop("use_dbscan") else None)
+        config.setdefault("segment", "dbscan" if config.pop("use_dbscan") else None)
         done.append(f"config['use_dbscan'] -> config['segment'] = {config['segment']!r} ('link', 'dbscan' or None)")
     if any("(km)" in d for d in config.get("dims", [])):
         done.append(f"config['dims'] {config['dims']}: use 'x_km', 'y_km', 'z_km'; events keep the names given in dims")
@@ -326,14 +284,14 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     v = config.get("vel", {"P": 6.0, "S": 6.0 / 1.73})
     vel = {"p": v["P"], "s": v["S"]}  # internally phases are lowercase
 
-    # cut the picks into segments for the mixture. "link" (default): groups of picks one event could produce, at most
-    # segment_max_picks each; "dbscan": the hierarchical DBSCAN cut; None: all picks in one segment
-    segment = config.get("segment", "link")
-    if segment not in ("link", "dbscan", None):
-        raise ValueError(f"config['segment'] = {segment!r}; use 'link', 'dbscan' or None")
     # dims (longitude, latitude, z_km): each segment is projected around its own stations, as ADLoc does per event,
     # so one run can cover any area, up to the whole globe
     geo = config["dims"][:2] == ["longitude", "latitude"]
+    # cut the picks into segments for the mixture. "dbscan" (default): the hierarchical DBSCAN cut; "link" (default for
+    # geographic dims): groups of picks one event could produce, at most segment_max_picks each; None: one segment
+    segment = config.get("segment", "link" if geo else "dbscan")
+    if segment not in ("link", "dbscan", None):
+        raise ValueError(f"config['segment'] = {segment!r}; use 'link', 'dbscan' or None")
     if geo and (segment != "link" or len(config["dims"]) != 3):
         raise ValueError("dims (longitude, latitude, z_km) need segment 'link', which keeps each segment local")
     if segment == "link":
@@ -343,26 +301,20 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             labels[seg] = k
         unique_labels = set(labels).difference([-1])
     elif segment == "dbscan":
-        # db = DBSCAN(eps=config["dbscan_eps"], min_samples=config["dbscan_min_samples"]).fit(
-        #     np.hstack([data[:, 0:1], locs[:, :2] / np.average(vel["p"])]),
-        #     sample_weight=np.squeeze(phase_weight),
-        # )
-        # labels = db.labels_
+        # eps (s) from the spacing of the stations with picks, unless given
+        eps = config["dbscan_eps"] if "dbscan_eps" in config else estimate_eps(np.unique(locs, axis=0), vel["p"])
         labels = hierarchical_dbscan_clustering(
             data,
             locs,
             phase_type,
             phase_weight,
             vel,
-            eps=config["dbscan_eps"],
-            min_samples=config["dbscan_min_samples"],
-            min_cluster_size=config["dbscan_min_cluster_size"] if "dbscan_min_cluster_size" in config else 500,
-            max_time_space_ratio=(
-                config["dbscan_max_time_space_ratio"] if "dbscan_max_time_space_ratio" in config else 10
-            ),
+            eps=eps,
+            min_samples=config.get("dbscan_min_samples", 3),
+            min_cluster_size=config.get("dbscan_min_cluster_size", 500),
+            max_time_space_ratio=config.get("dbscan_max_time_space_ratio", 10),
         )
-        unique_labels = set(labels)
-        unique_labels = unique_labels.difference([-1])
+        unique_labels = set(labels).difference([-1])
     else:
         labels = np.zeros(len(data))
         unique_labels = [0]
