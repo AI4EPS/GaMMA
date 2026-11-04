@@ -1,5 +1,5 @@
 import time
-from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import scipy.optimize
@@ -8,12 +8,17 @@ from numba import njit
 
 # import shelve
 
+MAX_ITER, TOL = 100, 1e-8  # sweeps stop when no node changes by more than TOL (s), as in ADLoc and ADTomo
+MARGIN = 2  # grid cells beyond the events and stations, as in ADLoc
+DZ_STA = 0.1  # km: stations within 100 m of depth share a table (a station moves at most 50 m, ~0.01 s, far below
+# pick noise); ADLoc, which locates events precisely, uses 10 m, but statewide that is ~200 tables and ~1 GB
+
 ###################################### Eikonal Solver ######################################
 # |\nabla u| = f
 # ((u - a1)^+)^2 + ((u - a2)^+)^2 + ((u - a3)^+)^2 = f^2 h^2
 
 
-@njit
+@njit(nogil=True)  # nogil: station tables are built in parallel threads
 def calculate_unique_solution(a, b, f, h):
     d = abs(a - b)
     if d >= f * h:
@@ -22,7 +27,7 @@ def calculate_unique_solution(a, b, f, h):
         return (a + b + np.sqrt(2 * f * f * h * h - (a - b) ** 2)) / 2
 
 
-@njit
+@njit(nogil=True)
 def sweeping_over_I_J_K(u, I, J, f, h):
     m = len(I)
     n = len(J)
@@ -51,7 +56,7 @@ def sweeping_over_I_J_K(u, I, J, f, h):
     return u
 
 
-@njit
+@njit(nogil=True)
 def sweeping(u, v, h):
     f = 1.0 / v  ## slowness
 
@@ -76,32 +81,34 @@ def sweeping(u, v, h):
 
 
 def eikonal_solve(u, f, h):
-    for i in range(50):
+    for i in range(MAX_ITER):
         u_old = np.copy(u)
         u = sweeping(u, f, h)
 
         err = np.max(np.abs(u - u_old))
-        if err < 1e-6:
+        if err < TOL:
             break
+    else:
+        print(f"Warning: eikonal sweeps did not converge in {MAX_ITER} iterations")
     return u
 
 
 ###################################### Traveltime based on Eikonal Timetable ######################################
 @njit
-def _bilinear(tt, iph, r, z, r0, z0, h):
-    """Time and its exact derivatives (dt/dr, dt/dz) of the bilinear interpolant of tables tt (phase, nr, nz), so the
-    optimizer sees a consistent pair (as in ADLoc). Beyond the grid the edge cell's bilinear form continues, so the
-    gradient never vanishes there."""
+def _bilinear(tt, iph, itab, r, z, r0, z0, h):
+    """Time and its exact derivatives (dt/dr, dt/dz) of the bilinear interpolant of tables tt (phase, table, nr, nz),
+    so the optimizer sees a consistent pair (as in ADLoc). Beyond the grid the edge cell's bilinear form continues, so
+    the gradient never vanishes there."""
     n = r.shape[0]
-    nr, nz = tt.shape[1], tt.shape[2]
+    nr, nz = tt.shape[2], tt.shape[3]
     t, tr, tz = np.empty(n), np.empty(n), np.empty(n)
     for k in range(n):
-        p = iph[k]
+        p, m = iph[k], itab[k]
         x, y = (r[k] - r0) / h, (z[k] - z0) / h
         i = min(max(int(np.floor(x)), 0), nr - 2)
         j = min(max(int(np.floor(y)), 0), nz - 2)
         fx, fy = x - i, y - j
-        t00, t10, t01, t11 = tt[p, i, j], tt[p, i + 1, j], tt[p, i, j + 1], tt[p, i + 1, j + 1]
+        t00, t10, t01, t11 = tt[p, m, i, j], tt[p, m, i + 1, j], tt[p, m, i, j + 1], tt[p, m, i + 1, j + 1]
         c = t11 - t10 - t01 + t00
         t[k] = t00 + (t10 - t00) * fx + (t01 - t00) * fy + c * fx * fy
         tr[k] = ((t10 - t00) + c * fy) / h
@@ -111,16 +118,25 @@ def _bilinear(tt, iph, r, z, r0, z0, h):
 
 def traveltime_grad(event_loc, station_loc, phase_type, vel={"p": 6.0, "s": 6.0 / 1.75}, eikonal=None):
     """Travel times (n,) and their gradients w.r.t. the event location (n, ndim) for paired (or broadcast) event and
-    station locations (n, ndim): straight rays at vel, or the eikonal tables (3-D locations only)."""
+    station locations (n, ndim): straight rays at vel, or the eikonal tables (3-D locations only), read at the event's
+    absolute depth from the table of the station's depth, as in ADLoc."""
     d = event_loc - station_loc  # (n, ndim)
     is_s = np.asarray(phase_type) == "s"
     if eikonal is None:
         v = np.where(is_s, vel["s"], vel["p"])
         dist = np.linalg.norm(d, axis=-1)
         return dist / v, d / (dist + 1e-6)[:, None] / v[:, None]
+    n = len(d)
+    z_sta, z_tab = np.broadcast_to(station_loc[..., 2], (n,)), eikonal["station_z"]
+    itab = np.searchsorted((z_tab[1:] + z_tab[:-1]) / 2, z_sta)  # the nearest table by depth
+    if np.any(np.abs(z_tab[itab] - z_sta) > DZ_STA / 2 + 1e-4):
+        raise ValueError("a station depth has no eikonal table: pass every station's depth in station_z_km")
     r = np.hypot(d[:, 0], d[:, 1])
-    t, tr, tz = _bilinear(eikonal["tt"], is_s.astype(np.int64), r, d[:, 2], eikonal["rgrid"][0], eikonal["zgrid"][0], eikonal["h"])
-    return t, np.column_stack([tr * d[:, 0] / (r + 1e-6), tr * d[:, 1] / (r + 1e-6), tz])
+    z = np.ascontiguousarray(np.broadcast_to(event_loc[..., 2], (n,)), dtype=float)
+    t, tr, tz = _bilinear(eikonal["tt"], is_s.astype(np.int64), itab, r, z, 0.0, eikonal["zgrid"][0], eikonal["h"])
+    rr = np.where(r > 1e-9, r, 1.0)  # the horizontal direction d / r, and 0 on the station's axis, as in ADLoc
+    cx, cy = np.where(r > 1e-9, d[:, 0] / rr, 0.0), np.where(r > 1e-9, d[:, 1] / rr, 0.0)
+    return t, np.column_stack([tr * cx, tr * cy, tz])
 
 
 def traveltime(event_loc, station_loc, phase_type, eikonal):
@@ -318,67 +334,59 @@ def calc_mag_batch(amp, event_loc, station_loc, weight, min=-2, max=8):
     return np.clip((mag_ * w).sum(1) / (w.sum(1) + 1e-6), min, max)
 
 
+def station_table(zz, vel, z_sta, rgrid, zgrid, h):
+    """Travel time (s) from a station at r = 0 and absolute depth z_sta (km) on the shared (r, z) grid. As in ADLoc and
+    ADTomo, the 4 nodes around the station start from the straight-ray time by Simpson's rule; sweeps solve the rest."""
+    f = np.tile(1.0 / np.interp(zgrid, zz, vel), (len(rgrid), 1))  # slowness (nr, nz)
+    y = (z_sta - zgrid[0]) / h
+    j0 = min(max(int(np.floor(y)), 0), len(zgrid) - 2)  # the station's cell
+    s_sta = (1 - (y - j0)) * f[0, j0] + (y - j0) * f[0, j0 + 1]
+    s_mid = f[:2, j0 : j0 + 2].mean()
+    u = np.full(f.shape, 1000.0)
+    for i in (0, 1):
+        for j in (j0, j0 + 1):
+            u[i, j] = np.hypot(rgrid[i], zgrid[j] - z_sta) / 6.0 * (s_sta + 4.0 * s_mid + f[i, j])
+    return eikonal_solve(u, 1.0 / f, h)
+
+
 def initialize_eikonal(config):
-    path = Path("./eikonal")
-    path.mkdir(exist_ok=True)
-    if "rmax_km" in config:  # the largest event-station distance needed
-        rlim = [0, config["rmax_km"]]
-    else:  # the region's diagonal
-        xlim, ylim = config["xlim_km"], config["ylim_km"]
-        rlim = [0, np.sqrt((xlim[1] - xlim[0]) ** 2 + (ylim[1] - ylim[0]) ** 2)]
-    zlim = config["zlim_km"]
+    """One travel-time table per station depth on a grid shared by all stations, as in ADLoc: r (km from the station)
+    by z (km, absolute depth, positive down; a station above sea level has z < 0). The 1-D model is read at absolute
+    depth, so every station sees the same layers, and its top velocity extends upward to the highest station.
+
+    config: vel {"Z", "P", "S"} (km, km/s), h (km), xlim_km and ylim_km (the region) or rmax_km (the largest distance),
+    zlim_km (event depths), and station_z_km (the station depths). Adds the tables and the grid to config and returns
+    it."""
     h = config["h"]
+    z_sta = np.unique(np.round(np.asarray(config["station_z_km"], dtype=float) / DZ_STA)) * DZ_STA
+    if "rmax_km" in config:  # the largest event-station distance needed
+        rmax = config["rmax_km"]
+    else:  # the region's diagonal
+        rmax = np.hypot(config["xlim_km"][1] - config["xlim_km"][0], config["ylim_km"][1] - config["ylim_km"][0])
+    rgrid = np.arange(int(np.ceil(rmax / h)) + MARGIN + 1) * h
+    z0 = (np.floor(min(config["zlim_km"][0], z_sta.min()) / h) - MARGIN) * h  # nodes on multiples of h, as in ADLoc
+    z1 = (np.ceil(max(config["zlim_km"][1], z_sta.max()) / h) + MARGIN) * h
+    zgrid = z0 + np.arange(int(round((z1 - z0) / h)) + 1) * h
 
-    # filename = f"timetable_{rlim[0]:.0f}_{rlim[1]:.0f}_{zlim[0]:.0f}_{zlim[1]:.0f}_{h:.3f}"
-    # if (path / (filename + ".dir")).is_file():
-    #     print("Loading precomputed timetable...")
-    #     with shelve.open(str(path / filename)) as db:
-    #         up = db["up"]
-    #         us = db["us"]
-    #         grad_up = db["grad_up"]
-    #         grad_us = db["grad_us"]
-    #         rgrid = db["rgrid"]
-    #         zgrid = db["zgrid"]
-    #         nr = db["nr"]
-    #         nz = db["nz"]
-    #         h = db["h"]
-    # else:
-
-    rgrid = np.arange(rlim[0], rlim[1], h)
-    zgrid = np.arange(zlim[0], zlim[1], h)
-    nr, nz = len(rgrid), len(zgrid)
-
-    vel = config["vel"]
-    zz, vp, vs = vel["Z"], vel["P"], vel["S"]  # as ADLoc
-    vp1d = np.interp(zgrid, zz, vp)
-    vs1d = np.interp(zgrid, zz, vs)
-    vp = np.ones((nr, nz)) * vp1d
-    vs = np.ones((nr, nz)) * vs1d
-
+    zz = np.asarray(config["vel"]["Z"], dtype=float)
     t0 = time.time()
-    ir0 = np.around((0 - rlim[0]) / h).astype(np.int64)
-    iz0 = np.around((0 - zlim[0]) / h).astype(np.int64)
-    up = 1000.0 * np.ones((nr, nz))
-    up[ir0, iz0] = 0.0
-    up = eikonal_solve(up, vp, h)
-
-    us = 1000.0 * np.ones((nr, nz))
-    us[ir0, iz0] = 0.0
-    us = eikonal_solve(us, vs, h)
-
+    with ThreadPoolExecutor() as pool:  # one table per thread; the sweeps release the GIL
+        tt = [
+            list(pool.map(lambda z: station_table(zz, np.asarray(config["vel"][ph], float), z, rgrid, zgrid, h), z_sta))
+            for ph in ("P", "S")
+        ]
     config.update(
         {
-            "tt": np.stack([up, us]),  # (phase, nr, nz), read by traveltime_grad
-            "up": up.flatten(),
-            "us": us.flatten(),
+            "tt": np.array(tt, dtype=np.float32),  # (phase, table, nr, nz), read by traveltime_grad
+            "station_z": z_sta,
             "rgrid": rgrid,
             "zgrid": zgrid,
-            "nr": nr,
-            "nz": nz,
+            "nr": len(rgrid),
+            "nz": len(zgrid),
             "h": h,
         }
     )
-    print(f"Eikonal: P and S tables of {nr} x {nz} nodes in {time.time() - t0:.1f} s")
+    print(f"Eikonal: {len(z_sta)} station tables of {len(rgrid)} x {len(zgrid)} nodes in {time.time() - t0:.1f} s")
 
     return config
 

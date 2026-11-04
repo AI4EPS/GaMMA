@@ -385,7 +385,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         if geo:  # the travel-time table only has to reach across the largest segment's bounds
             rmax = max([np.hypot(b[0][1] - b[0][0], b[1][1] - b[1][0]) for *_, b in tasks], default=1.0)
             config["eikonal"] = {**config["eikonal"], "rmax_km": rmax}
-        config["eikonal"] = initialize_eikonal(config["eikonal"])
+        # one table per station depth (station z_km, absolute, positive down), as in ADLoc
+        config["eikonal"] = initialize_eikonal({**config["eikonal"], "station_z_km": locs[:, 2]})
 
     if "ncpu" not in config:
         config["ncpu"] = max(1, min(len(unique_labels) // 4, min(32, mp.cpu_count() - 1)))
@@ -421,7 +422,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             if config["eikonal"] is not None:
                 tables = os.path.join(tmp, "eikonal_tt.npy")
                 np.save(tables, config["eikonal"]["tt"])
-                eikonal = {k: v for k, v in config["eikonal"].items() if k not in ("tt", "up", "us")}
+                eikonal = {k: v for k, v in config["eikonal"].items() if k != "tt"}
                 shared_config = {**config, "eikonal": eikonal}
             shared = (shared_config, timestamp0, vel, method, tables)
             with mp.get_context(context).Pool(config["ncpu"], initializer=_init_worker, initargs=(shared,)) as p:
