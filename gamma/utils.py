@@ -511,9 +511,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
         event_idx += len(each_events)
 
-    # drop events their reliable nearest stations did not pick (picks that lined up by chance); 0 keeps every event
-    min_station_support = config.get("min_station_support", 0.3)
-    if min_station_support > 0 and len(events) > 0:
+    # drop events their reliable nearest stations did not pick (picks that lined up by chance). A run-level step, not
+    # with the per-event filters in associate(): station reliability is learned from all events of the run.
+    # min_station_support = 0 keeps every event.
+    if len(events) > 0:
         _, first, station = np.unique(picks.loc[pick_idx, "station_id"], return_index=True, return_inverse=True)
         sta_xy = locs[first, :2]  # (S, 2) every station with a pick (co-located channels stay separate stations)
         xy = ("longitude", "latitude") if geo else (names.get("x_km", "x_km"), names.get("y_km", "y_km"))
@@ -522,7 +523,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             sta_xy, ev_xy = geocentric(sta_xy), geocentric(ev_xy)
         pick, event = np.array([(pi, ei - event_idx0) for pi, ei, _ in assignment]).T
         pick_station = pd.Series(station, index=pick_idx).loc[pick].values
-        keep = keep_supported(ev_xy, sta_xy, event, pick_station, min_station_support)
+        keep = keep_supported(ev_xy, sta_xy, event, pick_station, config.get("min_station_support", 0.3))
         new = np.cumsum(keep) - 1 + event_idx0  # kept events renumbered from event_idx0
         events = [{**e, "event_index": int(new[i])} for i, e in enumerate(events) if keep[i]]
         assignment = [(pi, int(new[ei - event_idx0]), pr) for pi, ei, pr in assignment if keep[ei - event_idx0]]
