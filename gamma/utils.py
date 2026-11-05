@@ -126,33 +126,35 @@ def geocentric(lonlat):
     return np.column_stack(_GEOCENTRIC.transform(lonlat[:, 0], lonlat[:, 1], np.zeros(len(lonlat)))) / 1e3
 
 
-EXPECTED_PICKS = 8.0  # walk out from the epicentre over stations that together should pick this many times
-RELIABILITY_PICKS = 15  # events with this many picks measure station reliability: chance does not make them
-RELIABILITY_EVENTS = 10  # if fewer events reach RELIABILITY_PICKS (sparse networks), use the 10 with the most picks
-SKIP_PICKS, SKIP_MIN_SUPPORT = 12, 0.15  # events with this many picks need only a little support (busy sequences)
+NEIGHBOR_STATIONS = 8.0  # check the nearest stations around the epicentre, as many as 8 fully reliable ones
+LARGE_EVENT_PICKS = 15  # events with this many picks are real (chance does not make them): they measure reliability
+MIN_LARGE_EVENTS = 10  # if fewer events reach LARGE_EVENT_PICKS (sparse networks), use the 10 with the most picks
+TESTED_STATIONS = 10  # a large event tests the reliability of its 10 nearest stations
+MANY_PICKS, MANY_PICKS_SUPPORT = 12, 0.15  # events with 12+ picks need only 0.15 support (busy sequences)
 
 
-def nearest_station_support(ev_xy, num_picks, hits, sta_xy, k_rel=10):
-    """Observed / expected picks at an event's nearest reliable stations: ~1 for a real event, ~0 for picks that
-    lined up by chance (scattered stations, the ones between them silent).
+def nearest_station_support(ev_xy, num_picks, hits, sta_xy):
+    """Observed / expected picking stations near the epicentre: ~1 for a real event, ~0 for picks that lined up by
+    chance (scattered stations, the ones between them silent).
 
     ev_xy (E, d), sta_xy (S, d) in km; num_picks (E,); hits = (event, station) index arrays of each event's picks.
-    A station's reliability r is the share of the run's high-pick events it picked when among their k_rel nearest
-    stations, with one pseudo-count at 0.5, so stations that are often silent (skipped by analysts, noisy, switched
-    off) count little either way. Walking out from the epicentre until sum r >= EXPECTED_PICKS, a station of a real
-    event picks with probability r, so E[sum r hit] = sum r^2 and the score is sum r hit / sum r^2.
+    A station's reliability r is the share of the large events that picked it when it was among their
+    TESTED_STATIONS nearest, with one pseudo-count at 0.5, so stations that are often silent (skipped by analysts,
+    noisy, switched off) count little either way. The neighbourhood: walking out from the epicentre until sum r >=
+    NEIGHBOR_STATIONS. There a station of a real event picks with probability r, so E[sum r picked] = sum r^2, and
+    the support is sum r picked / sum r^2.
     """
     E, S = len(ev_xy), len(sta_xy)
     k = min(S, 100)  # the walk stops long before 100 stations
     order = cKDTree(sta_xy).query(ev_xy, k=k)[1].reshape(E, k)  # (E, k) stations by distance
-    h = np.isin(np.arange(E)[:, None] * S + order, hits[0] * S + hits[1])  # (E, k) picked
-    hp = num_picks >= min(RELIABILITY_PICKS, np.sort(num_picks)[-min(RELIABILITY_EVENTS, E)])
-    kr = min(k_rel, k)
-    tested = np.bincount(order[hp, :kr].ravel(), minlength=S)
-    picked = np.bincount(order[hp, :kr][h[hp, :kr]], minlength=S)
-    r = ((picked + 0.5) / (tested + 1.0))[order]  # (E, k)
-    walk = np.cumsum(r, 1) - r < EXPECTED_PICKS
-    return (r * h * walk).sum(1) / (r**2 * walk).sum(1)
+    picked = np.isin(np.arange(E)[:, None] * S + order, hits[0] * S + hits[1])  # (E, k)
+    large = num_picks >= min(LARGE_EVENT_PICKS, np.sort(num_picks)[-min(MIN_LARGE_EVENTS, E)])  # (E,)
+    nearest = order[large, : min(TESTED_STATIONS, k)]
+    n_tested = np.bincount(nearest.ravel(), minlength=S)  # (S,)
+    n_picked = np.bincount(nearest[picked[large, : nearest.shape[1]]], minlength=S)  # (S,)
+    r = ((n_picked + 0.5) / (n_tested + 1.0))[order]  # (E, k) reliability, stations by distance
+    neighbor = np.cumsum(r, 1) - r < NEIGHBOR_STATIONS  # (E, k)
+    return (r * picked * neighbor).sum(1) / (r**2 * neighbor).sum(1)
 
 
 def local_projection(locs):
@@ -507,8 +509,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         event_idx += len(each_events)
 
     # drop events their reliable nearest stations did not pick (chance alignments of scattered picks); 0 turns it off
-    min_support = config.get("min_station_support", 0.3)
-    if min_support > 0 and events:
+    min_station_support = config.get("min_station_support", 0.3)
+    if min_station_support > 0 and len(events) > 0:
         station = np.array([s.rsplit("_", 1)[0] for s in pick_station_id])  # pick_station_id is station_phase
         _, first, sta_of_pick = np.unique(station, return_index=True, return_inverse=True)
         sta_xy = locs[first, :2]  # (S, 2) every station with a pick
@@ -520,7 +522,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         a = np.array([(ei - event_idx0, pi) for pi, ei, _ in assignment], dtype=np.int64).reshape(-1, 2)
         num_picks = np.array([e["num_picks"] for e in events])
         support = nearest_station_support(ev_xy, num_picks, (a[:, 0], sta_of.loc[a[:, 1]].values), sta_xy)
-        keep = (support >= min_support) | ((num_picks >= SKIP_PICKS) & (support >= SKIP_MIN_SUPPORT))
+        keep = (support >= min_station_support) | ((num_picks >= MANY_PICKS) & (support >= MANY_PICKS_SUPPORT))
         new = np.cumsum(keep) - 1 + event_idx0  # kept events renumbered from event_idx0
         events = [{**e, "event_index": int(new[i])} for i, e in enumerate(events) if keep[i]]
         assignment = [(pi, int(new[ei - event_idx0]), pr) for pi, ei, pr in assignment if keep[ei - event_idx0]]
