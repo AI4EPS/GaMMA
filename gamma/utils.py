@@ -126,6 +126,40 @@ def geocentric(lonlat):
     return np.column_stack(_GEOCENTRIC.transform(lonlat[:, 0], lonlat[:, 1], np.zeros(len(lonlat)))) / 1e3
 
 
+NEIGHBOR_STATIONS = 8  # an event's neighbourhood: its nearest stations, as many as 8 fully reliable ones
+LARGE_EVENT_PICKS = 15  # events with this many picks are real (chance does not make them): they measure reliability
+
+
+def keep_supported(ev_xy, sta_xy, pick_event, pick_station, min_support):
+    """Keep the events their nearest reliable stations picked; drop picks that lined up by chance (scattered
+    stations, the ones between them silent).
+
+    ev_xy (E, d), sta_xy (S, d) in km; pick_event, pick_station (P,): the event and station of each assigned pick.
+    1. Reliability r of each station: the share of the large events (LARGE_EVENT_PICKS picks, or half the largest
+       event's when fewer) that picked it when it was among their NEIGHBOR_STATIONS nearest, pulled to 0.5 by one
+       pseudo-count. Often-silent stations (offline, noisy, skipped by analysts) then count little either way.
+    2. Neighbourhood of an event: its nearest stations until sum r reaches NEIGHBOR_STATIONS.
+    3. Support: observed / expected picking stations there. A station of a real event picks with probability r, so
+       support = sum r picked / sum r^2: ~1 for a real event, ~0 for a chance one.
+    4. Keep if support >= min_support, eased in proportion for events picked at more than NEIGHBOR_STATIONS stations.
+    """
+    E, S, K = len(ev_xy), len(sta_xy), NEIGHBOR_STATIONS
+    near = cKDTree(sta_xy).query(ev_xy, k=min(S, 100))[1].reshape(E, -1)  # (E, k) stations by distance
+    pairs = np.unique(pick_event * S + pick_station)  # one per (event, picking station)
+    picked = np.isin(np.arange(E)[:, None] * S + near, pairs)  # (E, k)
+    n_stations = np.bincount(pairs // S, minlength=E)  # (E,)
+    num_picks = np.bincount(pick_event, minlength=E)  # (E,)
+
+    large = num_picks >= min(LARGE_EVENT_PICKS, num_picks.max() / 2)  # (E,)
+    tested = near[large, :K]  # (L, K)
+    r = (np.bincount(tested[picked[large, :K]], minlength=S) + 0.5) / (np.bincount(tested.ravel(), minlength=S) + 1)
+
+    r = r[near]  # (E, k)
+    inside = np.cumsum(r, 1) - r < K  # (E, k) the neighbourhood
+    support = (r * picked * inside).sum(1) / (r**2 * inside).sum(1)
+    return support >= min_support * np.minimum(1, K / n_stations)
+
+
 def local_projection(locs):
     """Azimuthal equidistant projection centred on the mean of the stations of locs = (longitude, latitude, z), as ADLoc
     builds each event's frame. Longitude is averaged on the circle, so stations across +-180 deg stay together.
@@ -271,7 +305,7 @@ def translate_old_columns(picks, stations, dims=None):
     alias = {"x_km": "x(km)", "y_km": "y(km)", "z_km": "z(km)", "x(km)": "x_km", "y(km)": "y_km", "z(km)": "z_km"}
     found = {"id": "station_id"} if ("id" in stations and "station_id" not in stations) else {}
     found.update({alias[d]: d for d in (dims or []) if d not in stations and alias.get(d) in stations})
-    if "z_km" not in stations and "z(km)" in stations and "z_km" not in found.values():
+    if "z_km" not in stations and "z(km)" in stations and "z_km" not in found.values() and "z(km)" not in (dims or []):
         found["z(km)"] = "z_km"
     if found:
         stations = stations.rename(columns=found)
@@ -476,6 +510,23 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
             events.append({names.get(key, key): value for key, value in event.items()})
         assignment.extend((pi, ei + event_idx, pr) for pi, ei, pr in each_assignment)
         event_idx += len(each_events)
+
+    # drop events their reliable nearest stations did not pick (picks that lined up by chance). A run-level step, not
+    # with the per-event filters in associate(): station reliability is learned from all events of the run.
+    # min_station_support = 0 keeps every event.
+    if len(events) > 0:
+        _, first, station = np.unique(picks.loc[pick_idx, "station_id"], return_index=True, return_inverse=True)
+        sta_xy = locs[first, :2]  # (S, 2) every station with a pick (co-located channels stay separate stations)
+        xy = ("longitude", "latitude") if geo else (names.get("x_km", "x_km"), names.get("y_km", "y_km"))
+        ev_xy = np.array([[e[xy[0]], e[xy[1]]] for e in events])  # (E, 2) in the frame of locs
+        if geo:  # distances in km on the globe
+            sta_xy, ev_xy = geocentric(sta_xy), geocentric(ev_xy)
+        pick, event = np.array([(pi, ei - event_idx0) for pi, ei, _ in assignment]).T
+        pick_station = pd.Series(station, index=pick_idx).loc[pick].values
+        keep = keep_supported(ev_xy, sta_xy, event, pick_station, config.get("min_station_support", 0.3))
+        new = np.cumsum(keep) - 1 + event_idx0  # kept events renumbered from event_idx0
+        events = [{**e, "event_index": int(new[i])} for i, e in enumerate(events) if keep[i]]
+        assignment = [(pi, int(new[ei - event_idx0]), pr) for pi, ei, pr in assignment if keep[ei - event_idx0]]
 
     print(f"Associated {len(events)} events with {len(assignment)} picks")
     return events, assignment  # , event_idx.value
