@@ -726,8 +726,8 @@ def associate(
 def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_iter=5):
     """ADLoc's RANSAC without the random sampling, since the mixture's centre is already a robust start: locate the
     event on its kept picks, keep the picks within max_residual_time (s) and max_residual_amplitude (log10) of that
-    fit, and repeat until the kept picks stop changing. max_residual_time defaults to 1.0 s (~3 sigma of real PhaseNet
-    residuals). max_residual_amplitude defaults to no limit, as in ADLoc: amplitudes cluster the picks and give the
+    fit, and repeat until the kept picks stop changing. max_residual_time defaults to 2.0 s: looser than ADLoc's 1.0 s,
+    whose locations are more accurate. max_residual_amplitude defaults to no limit, as in ADLoc: amplitudes cluster the picks and give the
     magnitude, and reject a pick only when a limit is set (1.0 is 4 to 5 sigma).
 
     center (D + 1[+ 1],) = (location, time[, magnitude]); data (n, 1 or 2) = (time[, log amplitude]).
@@ -740,7 +740,7 @@ def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_i
             data[:, :1], phase_type, locs, w, center[None, : D + 1], vel, config["eikonal"], config["bfgs_bounds"]
         )
         res = calc_time(loc, locs, phase_type, vel, config["eikonal"]) - data[:, :1]
-        ok = np.abs(res[:, 0]) < config.get("max_residual_time", 1.0)
+        ok = np.abs(res[:, 0]) < config.get("max_residual_time", 2.0)
         if config["use_amplitude"]:
             mag = calc_mag_batch(data[:, 1:2], loc[:, :D], locs, w)
             res = np.hstack([res, calc_amp(mag, loc, locs) - data[:, 1:2]])
