@@ -44,7 +44,7 @@ events, assignments = association(picks, stations, config, method="BGMM")
 ### Settings
 - **method** (argument, default = "BGMM"): "BGMM" or "GMM".
 - **xlim_km**, **ylim_km**, **zlim_km**: where events can be (km). **bfgs_bounds**, when given, overrides them.
-- **use_amplitude** (default = True): amplitudes take part in the clustering.
+- **use_amplitude** (default = True when the picks have phase_amplitude): amplitudes take part in the clustering.
 - **vel** (default = {"P": 6.0, "S": 6.0 / 1.73}): uniform velocity (km/s).
 - **eikonal** (optional): a 1D velocity model, read at absolute depth with one travel-time table per station depth:
   ```python
@@ -61,7 +61,7 @@ events, assignments = association(picks, stations, config, method="BGMM")
   - **min_picks** (default = 5): Minimum picks for associated earthquakes.
     - **min_p_picks**, **min_s_picks** (default = 0): Minimum P and S picks.
   - **min_score_sum** (default = 0.5 × min_picks): Minimum sum of the pick scores of an event.
-    - **min_p_score_sum**, **min_s_score_sum** (default = 0.5): The same for its P picks and for its S picks.
+    - **min_p_score_sum**, **min_s_score_sum** (default = 0.5): The same for its P picks and for its S picks. So an event needs both P and S; set 0 for picks of one phase.
   - **min_stations** (default = 0): Minimum stations.
   - **max_residual_time** (default = 2.0): Max phase time residual (s)
   - **max_residual_amplitude** (default = None, no limit): Max phase amplitude residual (log10 scale), with use_amplitude.

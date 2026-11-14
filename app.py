@@ -21,7 +21,7 @@ def predict(picks: dict, stations: dict, config: dict):
     events_, picks_ = run_gamma(picks, stations, config)
     if events_ is None:
         return {"events": None, "picks": picks_}
-    events_ = events_.to_dict(orient="records")
+    events_ = events_.astype(object).where(events_.notna(), None).to_dict(orient="records")  # NaN (no magnitude) is not JSON
     picks_ = picks_.to_dict(orient="records")
 
     return {"events": events_, "picks": picks_}

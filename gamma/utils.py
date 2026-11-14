@@ -322,9 +322,9 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     picks = picks.copy()
     translate_old_config(config)
     config.setdefault("min_picks", 5)  # an event: 5 picks, of an average score 0.5, with P and S (the score sums below)
-    config.setdefault("use_amplitude", True)
     config.setdefault("oversample_factor", 5 if method == "BGMM" else 1)  # the examples' values
     picks, stations = translate_old_columns(picks, stations, config.get("dims"))
+    config.setdefault("use_amplitude", "phase_amplitude" in picks)  # as ADLoc: amplitudes are used when the picks have them
 
     # the frame, as in ADLoc. config["proj"] (a pyproj Proj): one projection for every station (local).
     # Without it, each segment is projected around its own stations (global), as ADLoc does per event.
@@ -730,7 +730,7 @@ def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_i
     event on its kept picks, keep the picks within max_residual_time (s) and max_residual_amplitude (log10) of that
     fit, and repeat until the kept picks stop changing. max_residual_time defaults to 2.0 s: looser than ADLoc's 1.0 s,
     whose locations are more accurate. max_residual_amplitude defaults to None, no limit, as in ADLoc: amplitudes cluster the picks and give the
-    magnitude, and reject a pick only when a limit is set (1.0 is 4 to 5 sigma).
+    magnitude, and reject a pick only when a limit is set.
 
     center (D + 1[+ 1],) = (location, time[, magnitude]); data (n, 1 or 2) = (time[, log amplitude]).
     Returns the kept-pick mask (n,), the refitted center, and every pick's residuals (n, 1 or 2)."""
