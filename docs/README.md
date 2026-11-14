@@ -53,6 +53,8 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
     - **min_picks**: Minimum picks for associated earthquakes. We can also specify minimum P or S picks:
       - **min_p_picks**: Minimum P-picks for associated earthquakes.
       - **min_s_picks**: Minimum S-picks for associated earthquakes.
+    - **min_score_sum** (default = 0, off): the pick scores of an event must sum to at least this. The sum is the expected number of true picks, so five picks of score 0.3 count less than five of 0.9, which min_picks cannot tell apart. Per phase:
+      - **min_p_score_sum**, **min_s_score_sum** (default = 0, off): the same for the P picks and for the S picks.
     - **max_residual_time** (default = 1.0): Max phase time residual (s)
     - **max_residual_amplitude** (default = 1.0): Max phase amplitude residual (log10 scale)
     - The old names `max_sigma11` and `max_sigma22` still work with a warning, as max_residual_time and max_residual_amplitude; `max_sigma12` is ignored.

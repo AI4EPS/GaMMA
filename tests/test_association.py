@@ -89,3 +89,16 @@ if __name__ == "__main__":
     test_prebuilt_tables_and_modes()
     test_old_dims_still_run()
     print("ok")
+
+
+def test_score_sums_define_an_event():
+    picks, stations, _ = synthetic()  # 4 events, each 12 P and 12 S picks of score 0.9: score sum 21.6, 10.8 per phase
+    config = {**base_config(), "proj": PROJ}
+    t = pd.to_datetime(picks.phase_time)
+    weak = t < t.min() + pd.Timedelta(seconds=15)  # the first event
+    low = picks.assign(phase_score=np.where(weak, 0.3, 0.9))  # its picks are weak: sum 7.2
+    assert len(association(low, stations, config)[0]) == 4  # off by default: the count alone keeps it
+    assert len(association(low, stations, {**config, "min_score_sum": 10})[0]) == 3
+    no_s = picks.assign(phase_score=np.where(weak & (picks.phase_type == "S"), 0.01, 0.9))  # its S picks sum to 0.12
+    assert len(association(no_s, stations, {**config, "min_s_score_sum": 0.5})[0]) == 3
+    assert len(association(no_s, stations, {**config, "min_p_score_sum": 0.5})[0]) == 4

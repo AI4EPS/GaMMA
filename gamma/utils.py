@@ -685,10 +685,14 @@ def associate(
             gmm.centers_[i], data_[idx], locs_[idx], phase_type_[idx], phase_weight_[idx], config, vel
         )
         idx, res, ph = idx[keep], res[keep], phase_type_[idx[keep]]
+        score = phase_weight_[idx, 0]  # (n,) pick scores: their sum is the expected number of true picks
         if (
             len(idx) < config["min_picks"]
             or np.sum(ph == "p") < config.get("min_p_picks", 0)
             or np.sum(ph == "s") < config.get("min_s_picks", 0)
+            or score.sum() < config.get("min_score_sum", 0)
+            or score[ph == "p"].sum() < config.get("min_p_score_sum", 0)
+            or score[ph == "s"].sum() < config.get("min_s_score_sum", 0)
             or len(np.unique(locs_[idx], axis=0)) < config.get("min_stations", 0)
         ):
             continue
