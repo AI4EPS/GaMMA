@@ -1,3 +1,5 @@
+import json
+
 import pandas as pd
 from fastapi import FastAPI
 from gamma.utils import association
@@ -21,7 +23,7 @@ def predict(picks: dict, stations: dict, config: dict):
     events_, picks_ = run_gamma(picks, stations, config)
     if events_ is None:
         return {"events": None, "picks": picks_}
-    events_ = events_.astype(object).where(events_.notna(), None).to_dict(orient="records")  # NaN (no magnitude) is not JSON
+    events_ = json.loads(events_.to_json(orient="records"))  # a missing magnitude (NaN) becomes null
     picks_ = picks_.to_dict(orient="records")
 
     return {"events": events_, "picks": picks_}
