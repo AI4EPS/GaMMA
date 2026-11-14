@@ -102,3 +102,9 @@ def test_score_sums_define_an_event():
     no_s = picks.assign(phase_score=np.where(weak & (picks.phase_type == "S"), 0.01, 0.9))  # its S picks sum to 0.12
     assert len(association(no_s, stations, config)[0]) == 3  # the default asks for S
     assert len(association(no_s, stations, {**config, "min_s_score_sum": 0})[0]) == 4
+
+
+def test_min_picks_defaults_to_five():
+    picks, stations, _ = synthetic()
+    config = {k: v for k, v in base_config().items() if k != "min_picks"}
+    assert len(association(picks, stations, {**config, "proj": PROJ})[0]) == 4

@@ -50,7 +50,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
   - **initial_points** (default=[1,1,1] for (x, y, z) directions): Initial earthquake locations (cluster centers). For a large area over 10 degrees, more initial points are helpful, such as [2,2,1].
   - **covariance_prior** (default = 5 × (1.5², 0.5²) = (11.25, 1.25)) and **degrees_of_freedom_prior** (default = 5): the Wishart prior on each event's time (s²) and amplitude (log10²) residuals, as in scikit-learn: degrees_of_freedom_prior pseudo-picks with spreads of 1.5 s and 0.5. A larger time spread merges events; a smaller one splits them.
   - Filtering low quality association: each event is relocated on its own picks; picks with residuals above the limits below are dropped and the event relocated again, until its picks stop changing. The event is kept if enough picks remain.
-    - **min_picks** (required, no default): Minimum picks for associated earthquakes. We can also specify minimum P or S picks (default 0):
+    - **min_picks** (default = 5): Minimum picks for associated earthquakes. We can also specify minimum P or S picks (default 0):
       - **min_p_picks**: Minimum P-picks for associated earthquakes.
       - **min_s_picks**: Minimum S-picks for associated earthquakes.
     - **min_score_sum** (default = 0.5 × min_picks; 0 turns it off): the pick scores of an event must sum to at least this. The sum is the expected number of true picks, so five picks of score 0.3 count less than five of 0.9, which min_picks cannot tell apart. Per phase:

@@ -321,6 +321,7 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         config["eikonal"]["vel"] = {**config["eikonal"]["vel"]}
     picks = picks.copy()
     translate_old_config(config)
+    config.setdefault("min_picks", 5)  # an event: 5 picks, of an average score 0.5, with P and S (the score sums below)
     picks, stations = translate_old_columns(picks, stations, config.get("dims"))
 
     # the frame, as in ADLoc. config["proj"] (a pyproj Proj): one projection for every station (local).
