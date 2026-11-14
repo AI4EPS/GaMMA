@@ -206,7 +206,8 @@ def calc_mag(data, event_loc, station_loc, weight, min=-2, max=8):
     # mag_ = ( data - 2.48 + 2.76 * np.log10(dist) )
     ## Picozzi et al. (2018) A rapid response magnitude scale...
     c0, c1, c2, c3 = 1.08, 0.93, -0.015, -1.68
-    mag_ = (data - c0 - c3 * np.log10(np.maximum(dist, 0.1))) / c1 + 3.5
+    weight = weight * ~np.isnan(data)  # a pick without amplitude (NaN) has no say in the magnitude
+    mag_ = (np.nan_to_num(data) - c0 - c3 * np.log10(np.maximum(dist, 0.1))) / c1 + 3.5
     ## Atkinson, G. M. (2015). Ground-Motion Prediction Equation...
     # c0, c1, c2, c3, c4 = (-4.151, 1.762, -0.09509, -1.669, -0.0006)
     # mag_ = (data - c0 - c3*np.log10(dist))/c1
@@ -365,8 +366,8 @@ def calc_mag_batch(amp, event_loc, station_loc, weight, min=-2, max=8):
     """calc_mag for all K components: amp (N, 1), event_loc (K, D), station_loc (N, D), weight (N, K) -> (K,)"""
     dist = np.linalg.norm(event_loc[:, None, :] - station_loc[None, :, :], axis=-1)  # (K, N)
     c0, c1, c3 = 1.08, 0.93, -1.68  # Picozzi et al. (2018), as in calc_mag
-    mag_ = (amp[:, 0][None, :] - c0 - c3 * np.log10(np.maximum(dist, 0.1))) / c1 + 3.5
-    w = weight.T
+    mag_ = (np.nan_to_num(amp[:, 0])[None, :] - c0 - c3 * np.log10(np.maximum(dist, 0.1))) / c1 + 3.5
+    w = weight.T * ~np.isnan(amp[:, 0])  # a pick without amplitude (NaN) has no say in the magnitude
     mu = (mag_ * w).sum(1, keepdims=True) / (w.sum(1, keepdims=True) + 1e-6)
     std = np.sqrt(((mag_ - mu) ** 2 * w).sum(1, keepdims=True) / (w.sum(1, keepdims=True) + 1e-12))
     w = w * (np.abs(mag_ - mu) <= 2 * std)
@@ -457,7 +458,7 @@ def initialize_centers(
     # prob_sum[prob_sum == 0] = 1.0
     # resp = prob / prob_sum
 
-    dist = np.linalg.norm(means - X, axis=-1).T  # (n_components, n_samples, n_features) -> (n_samples, n_components)
+    dist = np.abs(means[..., 0] - X[:, 0]).T  # (n_samples, n_components), in time: the amplitude means are the data
     resp = 1 / sigma * np.exp(-(dist**2) / (2 * sigma**2)) * phase_weight[:, np.newaxis]
     resp_sum = resp.sum(axis=1, keepdims=True)
     resp_sum[resp_sum == 0] = 1.0

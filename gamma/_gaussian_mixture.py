@@ -163,9 +163,19 @@ def _estimate_gaussian_covariances_full(resp, X, nk, means, reg_covar):
     """
     n_components, _, n_features = means.shape
     covariances = np.empty((n_components, n_features, n_features), dtype=X.dtype)
+    has_amp = ~np.isnan(X[:, 1:]).any(axis=1)  # a pick without amplitude is NaN there
     for k in range(n_components):
         diff = X - means[k]
+        diff[~has_amp, -1] = 0
         covariances[k] = np.dot(resp[:, k] * diff.T, diff) / nk[k]
+        if not has_amp.all():
+            # the amplitude variance and the time-amplitude covariance are averages over the picks with an amplitude;
+            # the time variance is over all picks, so the covariance is clipped to keep the matrix positive definite
+            c = covariances[k]
+            scale = nk[k] / (resp[has_amp, k].sum() + 10 * np.finfo(resp.dtype).eps)
+            c[1, 1] *= scale
+            bound = np.sqrt(c[0, 0] * c[1, 1])
+            c[0, 1] = c[1, 0] = np.clip(c[0, 1] * scale, -bound, bound)
         covariances[k].flat[:: n_features + 1] += reg_covar
     return covariances
 
@@ -527,7 +537,15 @@ def _estimate_log_gaussian_prob(X, means, precisions_chol, covariance_type):
         )
     # Since we are using the precision of the Cholesky decomposition,
     # `- 0.5 * log_det_precision` becomes `+ log_det_precision_chol`
-    return -0.5 * (n_features * np.log(2 * np.pi).astype(X.dtype) + log_prob) + log_det
+    log_prob = -0.5 * (n_features * np.log(2 * np.pi).astype(X.dtype) + log_prob) + log_det
+    no_amp = np.isnan(X[:, 1:]).any(axis=1)  # picks without amplitude
+    if no_amp.any():
+        # their likelihood is the marginal over amplitude, N(time; Sigma_tt): the 1-D model, whose precision Cholesky
+        # is the upper-triangular factor's first entry, Sigma_tt^-1/2
+        log_prob[no_amp] = _estimate_log_gaussian_prob(
+            X[no_amp, :1], means[:, no_amp, :1], precisions_chol[:, :1, :1], covariance_type
+        )
+    return log_prob
 
 
 class GaussianMixture(BaseMixture):
