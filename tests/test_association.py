@@ -84,6 +84,39 @@ def test_old_dims_still_run():
     assert len(events) == 4 and np.abs(xyz - truth).max() < 0.5
 
 
+def test_score_sums_define_an_event():
+    picks, stations, _ = synthetic()  # 4 events, each 12 P and 12 S picks of score 0.9: score sum 21.6, 10.8 per phase
+    config = {**base_config(), "proj": PROJ}  # min_picks 5: min_score_sum defaults to 2.5, the phase sums to 0.5
+    t = pd.to_datetime(picks.phase_time)
+    weak = t < t.min() + pd.Timedelta(seconds=15)  # the first event
+    low = picks.assign(phase_score=np.where(weak, 0.3, 0.9))  # its picks are weak: sum 7.2
+    assert len(association(low, stations, config)[0]) == 4
+    assert len(association(low, stations, {**config, "min_score_sum": 10})[0]) == 3
+    no_s = picks.assign(phase_score=np.where(weak & (picks.phase_type == "S"), 0.01, 0.9))  # its S picks sum to 0.12
+    assert len(association(no_s, stations, config)[0]) == 3  # the default asks for S
+    assert len(association(no_s, stations, {**config, "min_s_score_sum": 0})[0]) == 4
+
+
+def test_min_picks_defaults_to_five():
+    picks, stations, _ = synthetic()
+    t = pd.to_datetime(picks.phase_time)
+    first, second = t < t.min() + pd.Timedelta(seconds=15), (t >= t.min() + pd.Timedelta(seconds=15)) & (t < t.min() + pd.Timedelta(seconds=35))
+    few = pd.concat([picks[first].sort_values("station_id").iloc[:5], picks[second].sort_values("station_id").iloc[:4]])  # 5 picks, 4 picks
+    config = {k: v for k, v in base_config().items() if k != "min_picks"}
+    assert len(association(few, stations, {**config, "proj": PROJ})[0]) == 1
+    assert len(association(few, stations, {**config, "proj": PROJ, "min_picks": 4})[0]) == 2
+
+
+def test_a_config_needs_only_the_region():
+    picks, stations, _ = synthetic()
+    config = {"xlim_km": (-30, 30), "ylim_km": (-30, 30), "zlim_km": (-1, 15), "proj": PROJ}
+    events, assignments = association(picks, stations, config, method="BGMM")  # use_amplitude, oversample_factor, min_picks by default
+    assert len(events) == 4 and len(assignments) == len(picks)
+    assert set(config) == {"xlim_km", "ylim_km", "zlim_km", "proj"}  # the caller's config is not changed
+    events, _ = association(picks.drop(columns="phase_amplitude"), stations, config)  # no amplitudes: time alone
+    assert len(events) == 4 and all(np.isnan(e["magnitude"]) for e in events)
+
+
 if __name__ == "__main__":
     test_config_not_changed_and_reusable()
     test_prebuilt_tables_and_modes()

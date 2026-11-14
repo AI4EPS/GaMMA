@@ -1,7 +1,7 @@
 # [*GaMMA*: *Ga*ussian *M*ixture *M*odel *A*ssociator](https://ai4eps.github.io/GaMMA)
 
-[![](https://github.com/wayneweiqiang/GaMMA/workflows/documentation/badge.svg)](https://ai4eps.github.io/GaMMA)
-[![](https://github.com/wayneweiqiang/GaMMA/workflows/wheels/badge.svg)](https://ai4eps.github.io/GaMMA)
+[![](https://github.com/AI4EPS/GaMMA/actions/workflows/docs.yml/badge.svg)](https://ai4eps.github.io/GaMMA)
+[![](https://github.com/AI4EPS/GaMMA/actions/workflows/pypi.yml/badge.svg)](https://pypi.org/project/gmma)
 
 ## 1. Install
 ```bash
@@ -20,58 +20,67 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
 - Xi, Z., Wei, S. S., Zhu, W., Beroza, G. C., Jie, Y., & Saloor, N. (2024). Deep learning for deep earthquakes: insights from OBS observations of the Tonga subduction zone. Geophysical Journal International, 238(2), 1073-1088.
 - Jie, Y., Wei, S. S., Zhu, W., Freymueller, J. T., & Elliott, J. (2025). Background Seismicity and Aftershocks of the 2020-2021 Large Earthquakes at the Alaska Peninsula Revealed by a Deep-learning-based Catalog. Authorea Preprints.
 
-![Method](https://raw.githubusercontent.com/wayneweiqiang/GaMMA/master/docs/assets/diagram_gamma_annotated.png)
+![Method](https://raw.githubusercontent.com/AI4EPS/GaMMA/main/docs/assets/diagram_gamma_annotated.png)
 
-## 3. Examples
+## 3. Usage
 
-- Inputs (the same names as [ADLoc](https://github.com/AI4EPS/ADLoc) since 1.8):
-  - **picks**: columns station_id, phase_time, phase_type ("P" or "S"), phase_score, phase_amplitude (m/s). A pick without an amplitude (NaN, -1 or <= 0: a station with no instrument response) is associated by its time alone; the magnitude comes from the picks that have one, and an event with none gets magnitude 999.
-  - **stations**: columns station_id and the coordinates named in **dims** (default ["x_km", "y_km", "z_km"], z_km positive down).
-  - The frame follows **proj**, as in ADLoc. With proj (a pyproj Proj), every station goes into that one frame and events also carry x_km, y_km in it. Without proj, one run can cover any area, up to the whole globe: picks cluster on the globe, each segment is projected around its own stations (azimuthal equidistant, as ADLoc does per event), and its events are located within 300 km of those stations. **dims** (the stations' own projected columns, as before 1.13) is deprecated but still works.
-  - Events come back with the coordinates named in dims, plus depth_km. Names from before 1.8 (id, timestamp, type, prob, amp, x(km), min_picks_per_eq, ...) still work and are translated with one warning.
-- Hyperparameters:
-  - **xlim_km**, **ylim_km**, **zlim_km**: the region (km) where events can be: the locator's bounds, and zlim_km also sets the depth where each event starts. **bfgs_bounds**, when given, overrides the bounds.
-  - **use_amplitude** (default = True): If using amplitude information.
-  - **vel** (default = {"P": 6.0, "S": 6.0 / 1.73}): velocity for P and S phases (uniform velocity model).
-  - **eikonal** (optional): When specified, the 1D velocity model overrides the uniform velocity model:
+```python
+from gamma.utils import association
+
+config = {"xlim_km": (-50, 50), "ylim_km": (-50, 50), "zlim_km": (0, 30), "proj": proj}  # proj: a pyproj Proj
+events, assignments = association(picks, stations, config, method="BGMM")
+```
+
+### Inputs (the same names as [ADLoc](https://github.com/AI4EPS/ADLoc))
+- **picks**: station_id, phase_time, phase_type ("P" or "S"), phase_score, phase_amplitude (m/s). A pick without an amplitude (NaN, -1 or <= 0) is associated by its time alone.
+- **stations**: station_id, longitude, latitude, z_km (positive down).
+- **proj**: with a pyproj Proj, every station goes into that one frame. Without it, each segment of picks gets its own frame around its stations, so one run can cover any area.
+- Names from before 1.8 still work, with one warning.
+
+### Outputs
+- **events**: time, longitude, latitude, depth_km (and x_km, y_km, z_km with proj), magnitude (NaN without amplitudes), sigma_time, sigma_amp, cov_time_amp, gamma_score, num_picks, num_p_picks, num_s_picks, event_index.
+- **assignments**: (pick index, event_index, score) for each associated pick.
+
+### Settings
+- **method** (argument, default = "BGMM"): "BGMM" or "GMM".
+- **xlim_km**, **ylim_km**, **zlim_km**: where events can be (km). **bfgs_bounds**, when given, overrides them.
+- **use_amplitude** (default = True when the picks have phase_amplitude): amplitudes take part in the clustering.
+- **vel** (default = {"P": 6.0, "S": 6.0 / 1.73}): uniform velocity (km/s).
+- **eikonal** (optional): a 1D velocity model, read at absolute depth with one travel-time table per station depth:
   ```python
-  {"vel": {"Z": [depths],
-  "P": [p_velocities],
-  "S": [s_velocities]},
-  "h": grid_spacing,
-  "zlim_km": z_range}  # optional: the tables' depth range; default the events' zlim_km
+  {"vel": {"Z": [depths], "P": [p_velocities], "S": [s_velocities]}, "h": grid_spacing, "zlim_km": z_range}
   ```
-  The tables reach across the farthest event-station pair (the region and the stations together); **xlim_km** and **ylim_km** here, when given, set that range instead. Set the tables' **zlim_km** deeper than the events' (e.g. (0, 60), below the Moho) so far stations' first arrivals (Pn) are modelled while events stay within the region; a range that does not cover the events' zlim_km is widened to cover it, with a warning.
-  Since 1.10.0 the 1D model is read at absolute depth, as in ADLoc and ADTomo: one travel-time table per station depth (stations within 100 m share one), so a station 2 km above sea level sees the same layers as one at sea level, 2 km further up. Event depths (z_km, depth_km) are below sea level; before 1.10.0 the model hung from each station, and depths were measured from the station surface (about the stations' mean elevation shallower).
-  - **segment** (default = "dbscan"): how to cut a long sequence of picks into segments, which speeds up association a lot. "dbscan": the hierarchical DBSCAN cut below (the default again since 1.12.0). "link": groups of picks that one event could produce (stations within 100 km whose time differences fit the distance between them), each at most **segment_max_picks** (default = 200) picks, split further in time (the default from 1.7.0 to 1.11). None: all picks in one segment. It replaces `use_dbscan`, which still works with a warning (True → "dbscan", False → None).
-  - **dbscan_eps** (default = 10.0s): The maximum time between two picks for one to be considered as a neighbor of the other. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
-  - **dbscan_min_samples** (default = 3): The number of samples in a neighborhood for a point to be considered as a core point. See details in [DBSCAN](https://scikit-learn.org/stable/modules/generated/sklearn.cluster.DBSCAN.html)
-  - **oversampling_factor** (default = 10): The initial number of clusters is determined by (Number of picks)/(Number of stations)/(Inital points) * (oversampling factor).
-  - **initial_points** (default=[1,1,1] for (x, y, z) directions): Initial earthquake locations (cluster centers). For a large area over 10 degrees, more initial points are helpful, such as [2,2,1].
-  - **covariance_prior** (default = 5 × (1.5², 0.5²) = (11.25, 1.25)) and **degrees_of_freedom_prior** (default = 5): the Wishart prior on each event's time (s²) and amplitude (log10²) residuals, as in scikit-learn: degrees_of_freedom_prior pseudo-picks with spreads of 1.5 s and 0.5. A larger time spread merges events; a smaller one splits them.
-  - Filtering low quality association: each event is relocated on its own picks; picks with residuals above the limits below are dropped and the event relocated again, until its picks stop changing. The event is kept if enough picks remain.
-    - **min_picks**: Minimum picks for associated earthquakes. We can also specify minimum P or S picks:
-      - **min_p_picks**: Minimum P-picks for associated earthquakes.
-      - **min_s_picks**: Minimum S-picks for associated earthquakes.
-    - **max_residual_time** (default = 1.0): Max phase time residual (s)
-    - **max_residual_amplitude** (default = 1.0): Max phase amplitude residual (log10 scale)
-    - The old names `max_sigma11` and `max_sigma22` still work with a warning, as max_residual_time and max_residual_amplitude; `max_sigma12` is ignored.
-    - **min_station_support** (default = 0.3; 0 keeps every event): drops events that picks lined up by chance. A real event is picked by the stations nearest to it; a chance event is a few scattered picks with silent stations in between. Support = picking stations observed / expected among an event's nearest 8 reliable stations: about 1 for a real event, about 0 by chance. Each station's reliability is measured on the run's own large events (15+ picks), so stations that are often silent (offline, noisy, skipped by analysts) count little. 0.3 asks roughly 3 of the nearest 8 reliable stations to pick; events picked at more than 8 stations need proportionally less (0.15 at 16). Weak events (5–8 picks) are often dropped too, since silence cannot tell them from chance well; a larger value (e.g. 0.4) removes more false events and a few more real ones.
+  Set its zlim_km deeper than the events' (e.g. (0, 60)) so that first arrivals at far stations (Pn) are modelled.
+- **segment** (default = "dbscan"): how picks are cut into segments before association: "dbscan", "link" (picks that one event could produce) or None.
+  - **dbscan_eps** (default: from the station spacing): max time (s) between neighbouring picks.
+  - **dbscan_min_samples** (default = 3): picks in a neighbourhood for a core point.
+- **oversample_factor** (default = 5 for BGMM, 1 for GMM): initial events per segment = most picks at one station × this.
+- **covariance_prior** (default = 5 × (1.5², 0.5²)) and **degrees_of_freedom_prior** (default = 5): the Wishart prior on each event's time (s²) and amplitude (log10²) spread. A larger time spread merges events; a smaller one splits them.
+- **ncpu** (default: up to 32): worker processes.
+- Filtering: each event is relocated on its own picks, picks beyond the residual limits are dropped, and the event is kept if what remains meets:
+  - **min_picks** (default = 5): Minimum picks for associated earthquakes.
+    - **min_p_picks**, **min_s_picks** (default = 0): Minimum P and S picks.
+  - **min_score_sum** (default = 0.5 × min_picks): Minimum sum of the pick scores of an event.
+    - **min_p_score_sum**, **min_s_score_sum** (default = 0.5): The same for its P picks and for its S picks. So an event needs both P and S; set 0 for picks of one phase.
+  - **min_stations** (default = 0): Minimum stations.
+  - **max_residual_time** (default = 2.0): Max phase time residual (s)
+  - **max_residual_amplitude** (default = None, no limit): Max phase amplitude residual (log10 scale), with use_amplitude.
+  - **min_station_support** (default = 0.3; 0 keeps every event): drops events whose nearest reliable stations did not pick them (picks that lined up by chance).
 
-Note the association speed is controlled by **dbscan_eps** and **oversampling_factor**. Larger values are preferred, but at the expense of a slower association speed.
+Speed is set by **dbscan_eps** and **oversample_factor**: larger values associate better and slower.
 
 - Synthetic Example
 
-![Association result](https://raw.githubusercontent.com/wayneweiqiang/GaMMA/master/docs/assets/result_eq05_err0.0_fp0.0_amp1.png)
+![Association result](https://raw.githubusercontent.com/AI4EPS/GaMMA/main/docs/assets/result_eq05_err0.0_fp0.0_amp1.png)
 
 - Example using [PhaseNet](https://wayneweiqiang.github.io/PhaseNet/) picks
 
-See details in the [notebook](https://github.com/wayneweiqiang/GaMMA/blob/master/docs/example_phasenet.ipynb): [example_phasenet.ipynb](example_phasenet.ipynb)
+See details in the [notebook](https://github.com/AI4EPS/GaMMA/blob/main/docs/example_phasenet.ipynb): [example_phasenet.ipynb](example_phasenet.ipynb)
 
 - Example using [Seisbench](https://github.com/seisbench/seisbench)
 
 See details in the [notebook](https://github.com/seisbench/seisbench/blob/main/examples/03c_catalog_seisbench_gamma.ipynb): [example_seisbench.ipynb](example_seisbench.ipynb)
 
-![Associaiton result](https://raw.githubusercontent.com/wayneweiqiang/GaMMA/master/docs/assets/2019-07-04T18-02-01.074.png)
+![Association result](https://raw.githubusercontent.com/AI4EPS/GaMMA/main/docs/assets/2019-07-04T18-02-01.074.png)
 
 More examples can be found in the earthquake detection workflow -- [QuakeFlow](https://ai4eps.github.io/QuakeFlow/)

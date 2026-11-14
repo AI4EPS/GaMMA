@@ -94,7 +94,7 @@ def test_association_with_missing_amplitudes():
     # no amplitude at all: no magnitude, and the association of the time-only model
     events, m, a = run(picks.assign(phase_amplitude=np.nan))
     events_t, _, a_t = run(picks, {**config, "use_amplitude": False})
-    assert (m == 999).all() and all(e["sigma_amp"] == 0 and e["cov_time_amp"] == 0 for e in events)
+    assert np.isnan(m).all() and all(e["sigma_amp"] == 0 and e["cov_time_amp"] == 0 for e in events)
     assert np.allclose(np.array(a), np.array(a_t), rtol=0, atol=1e-5)  # pick, event, score
     for key in ("x_km", "y_km", "z_km", "sigma_time", "gamma_score"):
         assert np.allclose([e[key] for e in events], [e[key] for e in events_t], rtol=0, atol=1e-5)

@@ -321,7 +321,10 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
         config["eikonal"]["vel"] = {**config["eikonal"]["vel"]}
     picks = picks.copy()
     translate_old_config(config)
+    config.setdefault("min_picks", 5)  # an event: 5 picks, of an average score 0.5, with P and S (the score sums below)
+    config.setdefault("oversample_factor", 5 if method == "BGMM" else 1)  # the examples' values
     picks, stations = translate_old_columns(picks, stations, config.get("dims"))
+    config.setdefault("use_amplitude", "phase_amplitude" in picks)  # amplitudes cluster when the picks have them
 
     # the frame, as in ADLoc. config["proj"] (a pyproj Proj): one projection for every station (local).
     # Without it, each segment is projected around its own stations (global), as ADLoc does per event.
@@ -685,22 +688,26 @@ def associate(
             gmm.centers_[i], data_[idx], locs_[idx], phase_type_[idx], phase_weight_[idx], config, vel
         )
         idx, res, ph = idx[keep], res[keep], phase_type_[idx[keep]]
+        score = phase_weight_[idx, 0]  # (n,) pick scores: their sum is the expected number of true picks
         if (
             len(idx) < config["min_picks"]
             or np.sum(ph == "p") < config.get("min_p_picks", 0)
             or np.sum(ph == "s") < config.get("min_s_picks", 0)
+            or score.sum() < config.get("min_score_sum", 0.5 * config["min_picks"])  # an average score of 0.5
+            or score[ph == "p"].sum() < config.get("min_p_score_sum", 0.5)
+            or score[ph == "s"].sum() < config.get("min_s_score_sum", 0.5)
             or len(np.unique(locs_[idx], axis=0)) < config.get("min_stations", 0)
         ):
             continue
 
         event_idx += 1
-        # the kept picks with an amplitude; an event without any has no magnitude (999, as without use_amplitude)
+        # the kept picks with an amplitude; an event without any has no magnitude (NaN, as without use_amplitude)
         has_amp = ~np.isnan(res[:, 1]) if config["use_amplitude"] else np.zeros(len(res), bool)
         event = {
             "time": datetime.fromtimestamp(center[D] + timestamp0, timezone.utc)
             .replace(tzinfo=None)
             .isoformat(timespec="milliseconds"),
-            "magnitude": center[D + 1] if has_amp.any() else 999,
+            "magnitude": center[D + 1] if has_amp.any() else np.nan,
             "sigma_time": np.sqrt(np.mean(res[:, 0] ** 2)),
             "sigma_amp": np.sqrt(np.mean(res[has_amp, 1] ** 2)) if has_amp.any() else 0,
             "cov_time_amp": np.mean(res[has_amp, 0] * res[has_amp, 1]) if has_amp.any() else 0,
@@ -721,7 +728,9 @@ def associate(
 def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_iter=5):
     """ADLoc's RANSAC without the random sampling, since the mixture's centre is already a robust start: locate the
     event on its kept picks, keep the picks within max_residual_time (s) and max_residual_amplitude (log10) of that
-    fit, and repeat until the kept picks stop changing. The 1.0 defaults are ~3 sigma of real PhaseNet residuals.
+    fit, and repeat until the kept picks stop changing. max_residual_time defaults to 2.0 s: looser than ADLoc's 1.0 s,
+    whose locations are more accurate. max_residual_amplitude defaults to None, no limit, as in ADLoc: amplitudes cluster the picks and give the
+    magnitude, and reject a pick only when a limit is set.
 
     center (D + 1[+ 1],) = (location, time[, magnitude]); data (n, 1 or 2) = (time[, log amplitude]).
     Returns the kept-pick mask (n,), the refitted center, and every pick's residuals (n, 1 or 2)."""
@@ -733,12 +742,13 @@ def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_i
             data[:, :1], phase_type, locs, w, center[None, : D + 1], vel, config["eikonal"], config["bfgs_bounds"]
         )
         res = calc_time(loc, locs, phase_type, vel, config["eikonal"]) - data[:, :1]
-        ok = np.abs(res[:, 0]) < config.get("max_residual_time", 1.0)
+        ok = np.abs(res[:, 0]) < config.get("max_residual_time", 2.0)
         if config["use_amplitude"]:
             mag = calc_mag_batch(data[:, 1:2], loc[:, :D], locs, w)
             res = np.hstack([res, calc_amp(mag, loc, locs) - data[:, 1:2]])
             # a pick without amplitude (NaN residual) is judged by its time alone
-            ok &= np.isnan(res[:, 1]) | (np.abs(res[:, 1]) < config.get("max_residual_amplitude", 1.0))
+            if config.get("max_residual_amplitude") is not None:  # None (the default): amplitudes reject no pick
+                ok &= np.isnan(res[:, 1]) | (np.abs(res[:, 1]) < config["max_residual_amplitude"])
             loc = np.hstack([loc, mag[:, None]])
         center = loc[0]
         if (ok == keep).all() or ok.sum() < 4:  # converged, or too few picks left to locate
