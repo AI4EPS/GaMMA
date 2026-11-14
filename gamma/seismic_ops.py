@@ -11,7 +11,7 @@ from numba import njit
 MAX_ITER, TOL = 100, 1e-8  # sweeps stop when no node changes by more than TOL (s), as in ADLoc and ADTomo
 MARGIN = 2  # grid cells beyond the events and stations, as in ADLoc
 DZ_STA = 0.1  # km: stations within 100 m of depth share a table (a station moves at most 50 m, ~0.01 s, far below
-# pick noise); ADLoc, which locates events precisely, uses 10 m, but statewide that is ~200 tables and ~1 GB
+# pick noise), as in ADLoc; 10 m bins are ~200 tables and ~1 GB statewide
 
 ###################################### Eikonal Solver ######################################
 # |\nabla u| = f
