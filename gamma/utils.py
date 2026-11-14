@@ -699,13 +699,13 @@ def associate(
             continue
 
         event_idx += 1
-        # the kept picks with an amplitude; an event without any has no magnitude (999, as without use_amplitude)
+        # the kept picks with an amplitude; an event without any has no magnitude (NaN, as without use_amplitude)
         has_amp = ~np.isnan(res[:, 1]) if config["use_amplitude"] else np.zeros(len(res), bool)
         event = {
             "time": datetime.fromtimestamp(center[D] + timestamp0, timezone.utc)
             .replace(tzinfo=None)
             .isoformat(timespec="milliseconds"),
-            "magnitude": center[D + 1] if has_amp.any() else 999,
+            "magnitude": center[D + 1] if has_amp.any() else np.nan,
             "sigma_time": np.sqrt(np.mean(res[:, 0] ** 2)),
             "sigma_amp": np.sqrt(np.mean(res[has_amp, 1] ** 2)) if has_amp.any() else 0,
             "cov_time_amp": np.mean(res[has_amp, 0] * res[has_amp, 1]) if has_amp.any() else 0,
@@ -727,7 +727,7 @@ def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_i
     """ADLoc's RANSAC without the random sampling, since the mixture's centre is already a robust start: locate the
     event on its kept picks, keep the picks within max_residual_time (s) and max_residual_amplitude (log10) of that
     fit, and repeat until the kept picks stop changing. max_residual_time defaults to 2.0 s: looser than ADLoc's 1.0 s,
-    whose locations are more accurate. max_residual_amplitude defaults to no limit, as in ADLoc: amplitudes cluster the picks and give the
+    whose locations are more accurate. max_residual_amplitude defaults to None, no limit, as in ADLoc: amplitudes cluster the picks and give the
     magnitude, and reject a pick only when a limit is set (1.0 is 4 to 5 sigma).
 
     center (D + 1[+ 1],) = (location, time[, magnitude]); data (n, 1 or 2) = (time[, log amplitude]).
@@ -745,7 +745,8 @@ def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_i
             mag = calc_mag_batch(data[:, 1:2], loc[:, :D], locs, w)
             res = np.hstack([res, calc_amp(mag, loc, locs) - data[:, 1:2]])
             # a pick without amplitude (NaN residual) is judged by its time alone
-            ok &= np.isnan(res[:, 1]) | (np.abs(res[:, 1]) < config.get("max_residual_amplitude", np.inf))
+            if config.get("max_residual_amplitude") is not None:  # None (the default): amplitudes reject no pick
+                ok &= np.isnan(res[:, 1]) | (np.abs(res[:, 1]) < config["max_residual_amplitude"])
             loc = np.hstack([loc, mag[:, None]])
         center = loc[0]
         if (ok == keep).all() or ok.sum() < 4:  # converged, or too few picks left to locate
