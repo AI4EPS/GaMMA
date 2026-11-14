@@ -322,6 +322,8 @@ def association(picks, stations, config, event_idx0=0, method="BGMM", **kwargs):
     picks = picks.copy()
     translate_old_config(config)
     config.setdefault("min_picks", 5)  # an event: 5 picks, of an average score 0.5, with P and S (the score sums below)
+    config.setdefault("use_amplitude", True)
+    config.setdefault("oversample_factor", 5 if method == "BGMM" else 1)  # the examples' values
     picks, stations = translate_old_columns(picks, stations, config.get("dims"))
 
     # the frame, as in ADLoc. config["proj"] (a pyproj Proj): one projection for every station (local).

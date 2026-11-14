@@ -108,3 +108,11 @@ def test_min_picks_defaults_to_five():
     picks, stations, _ = synthetic()
     config = {k: v for k, v in base_config().items() if k != "min_picks"}
     assert len(association(picks, stations, {**config, "proj": PROJ})[0]) == 4
+
+
+def test_a_config_needs_only_the_region():
+    picks, stations, _ = synthetic()
+    config = {"xlim_km": (-30, 30), "ylim_km": (-30, 30), "zlim_km": (-1, 15), "proj": PROJ, "use_amplitude": False}
+    events, assignments = association(picks, stations, config, method="BGMM")  # oversample_factor, min_picks, ... by default
+    assert len(events) == 4 and len(assignments) == len(picks)
+    assert "oversample_factor" not in config and "min_picks" not in config  # the caller's config is not changed
