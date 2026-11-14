@@ -802,7 +802,12 @@ class BayesianGaussianMixture(BaseMixture):
         # left out (the beta -> inf limit). With GaMMA's beta_k = nk it was -n_features / (2 nk), about -100 per pick
         # at nk = 0.01: an event that briefly lost its picks could never win them back, so real events died early.
         # return log_gauss + 0.5 * (log_lambda - n_features / self.mean_precision_)
-        return log_gauss + 0.5 * log_lambda
+        log_prob = log_gauss + 0.5 * log_lambda
+        no_amp = np.isnan(X[:, 1:]).any(axis=1)  # picks without amplitude: log_gauss is their 1-D (time) marginal
+        if no_amp.any():  # so they take the Wishart terms of the 1-D model: put back those of the second dimension
+            nu = self.degrees_of_freedom_
+            log_prob[no_amp] += 0.5 * (np.log(nu) - np.log(2.0) - digamma(0.5 * (nu - 1)))
+        return log_prob
 
     def _compute_lower_bound(self, log_resp, log_prob_norm):
         """Estimate the lower bound of the model.

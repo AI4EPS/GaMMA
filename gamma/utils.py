@@ -55,7 +55,8 @@ def convert_picks_csv(picks, stations, config, columns=("longitude", "latitude",
     timestamp0 = np.min(t)
     t = t - timestamp0
     if config["use_amplitude"]:
-        a = picks["phase_amplitude"].apply(lambda x: np.log10(x * 1e2)).to_numpy()  ##cm/s
+        # cm/s; a pick without amplitude (NaN, -1, <= 0) stays NaN and is associated by its time alone
+        a = picks["phase_amplitude"].where(picks["phase_amplitude"] > 0).apply(lambda x: np.log10(x * 1e2)).to_numpy()
         data = np.stack([t, a]).T
     else:
         data = t[:, np.newaxis]
@@ -693,14 +694,16 @@ def associate(
             continue
 
         event_idx += 1
+        # the kept picks with an amplitude; an event without any has no magnitude (999, as without use_amplitude)
+        has_amp = ~np.isnan(res[:, 1]) if config["use_amplitude"] else np.zeros(len(res), bool)
         event = {
             "time": datetime.fromtimestamp(center[D] + timestamp0, timezone.utc)
             .replace(tzinfo=None)
             .isoformat(timespec="milliseconds"),
-            "magnitude": center[D + 1] if config["use_amplitude"] else 999,
+            "magnitude": center[D + 1] if has_amp.any() else 999,
             "sigma_time": np.sqrt(np.mean(res[:, 0] ** 2)),
-            "sigma_amp": np.sqrt(np.mean(res[:, 1] ** 2)) if config["use_amplitude"] else 0,
-            "cov_time_amp": np.mean(res[:, 0] * res[:, 1]) if config["use_amplitude"] else 0,
+            "sigma_amp": np.sqrt(np.mean(res[has_amp, 1] ** 2)) if has_amp.any() else 0,
+            "cov_time_amp": np.mean(res[has_amp, 0] * res[has_amp, 1]) if has_amp.any() else 0,
             "gamma_score": prob_matrix[idx, i].sum(),
             "num_picks": len(idx),
             "num_p_picks": int(np.sum(ph == "p")),
@@ -734,7 +737,8 @@ def refit_event(center, data, locs, phase_type, phase_weight, config, vel, max_i
         if config["use_amplitude"]:
             mag = calc_mag_batch(data[:, 1:2], loc[:, :D], locs, w)
             res = np.hstack([res, calc_amp(mag, loc, locs) - data[:, 1:2]])
-            ok &= np.abs(res[:, 1]) < config.get("max_residual_amplitude", 1.0)
+            # a pick without amplitude (NaN residual) is judged by its time alone
+            ok &= np.isnan(res[:, 1]) | (np.abs(res[:, 1]) < config.get("max_residual_amplitude", 1.0))
             loc = np.hstack([loc, mag[:, None]])
         center = loc[0]
         if (ok == keep).all() or ok.sum() < 4:  # converged, or too few picks left to locate

@@ -25,7 +25,7 @@ The implementation is based on the [Gaussian mixture models](https://scikit-lear
 ## 3. Examples
 
 - Inputs (the same names as [ADLoc](https://github.com/AI4EPS/ADLoc) since 1.8):
-  - **picks**: columns station_id, phase_time, phase_type ("P" or "S"), phase_score, phase_amplitude (m/s).
+  - **picks**: columns station_id, phase_time, phase_type ("P" or "S"), phase_score, phase_amplitude (m/s). A pick without an amplitude (NaN, -1 or <= 0: a station with no instrument response) is associated by its time alone; the magnitude comes from the picks that have one, and an event with none gets magnitude 999.
   - **stations**: columns station_id and the coordinates named in **dims** (default ["x_km", "y_km", "z_km"], z_km positive down).
   - The frame follows **proj**, as in ADLoc. With proj (a pyproj Proj), every station goes into that one frame and events also carry x_km, y_km in it. Without proj, one run can cover any area, up to the whole globe: picks cluster on the globe, each segment is projected around its own stations (azimuthal equidistant, as ADLoc does per event), and its events are located within 300 km of those stations. **dims** (the stations' own projected columns, as before 1.13) is deprecated but still works.
   - Events come back with the coordinates named in dims, plus depth_km. Names from before 1.8 (id, timestamp, type, prob, amp, x(km), min_picks_per_eq, ...) still work and are translated with one warning.
